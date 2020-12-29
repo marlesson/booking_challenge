@@ -1,0 +1,10 @@
+name: booking_challenge
+channels:
+- anaconda
+dependencies:
+- python=3.6
+- pip:
+  - pyarrow==1.0.1
+  - unidecode==1.1.1
+  - gensim==3.8.3
+  - ../mars-gym
