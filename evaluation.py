@@ -60,6 +60,7 @@ import os
 from multiprocessing.pool import Pool
 from scipy import stats
 #from train import MostPopularTraining, CoOccurrenceTraining
+from sklearn.metrics import classification_report
 
 def acc(r, k =4):
     r = r[:k]
@@ -109,7 +110,7 @@ class EvaluationTask(BaseEvaluationTask):
     task_hash: str = luigi.Parameter(default="sub")
     generator_workers: int = luigi.IntParameter(default=0)
     pin_memory: bool = luigi.BoolParameter(default=False)
-    batch_size: int = luigi.IntParameter(default=100)
+    batch_size: int = luigi.IntParameter(default=1000)
     device: str = luigi.ChoiceParameter(choices=["cpu", "cuda"], default="cuda")
     normalize_dense_features: int = luigi.Parameter(default="min_max")
     normalize_file_path: str = luigi.Parameter(default=None)
@@ -171,50 +172,16 @@ class EvaluationTask(BaseEvaluationTask):
             pin_memory=self.pin_memory if self.device == "cuda" else False,
         )
 
-    def pos_process(self, rank_list):
-        df_item     = pd.read_csv(ITEM_META_PATH, usecols=["item_id", "domain_id", "domain_idx"]).fillna(0)#.head(10)
-        domain_map  = df_item[['item_id', 'domain_idx']].set_index("item_id").to_dict()["domain_idx"]
-
-        with Pool(os.cpu_count()) as p:
-            _map_domain = list(tqdm(
-                p.map(functools.partial(_get_domain, domain_map=domain_map), rank_list),
-                total=len(rank_list),
-            ))  
-            
-        arr_moda = list(zip(list(rank_list), 
-                            list(_map_domain),  
-                            list(map(_get_moda, _map_domain)), 
-                            list(map(_get_count_moda, _map_domain))))
-
-        df_moda = pd.DataFrame(arr_moda, columns=["reclist", "domainlist", "domain_moda", "count"])
-
-        df_moda['relevance_list'] = df_moda.apply(lambda row: 
-                                                _create_relevance_list_domain(row['domainlist'], row['domain_moda']),  
-                                                axis=1)
-
-        df_moda['reclist_2'] = df_moda.apply(lambda row: _sorte_by_domain_moda(
-                        row['reclist'], 
-                        row['relevance_list'], 
-                        row['count'], self.percent_limit)[:self.submission_size],  axis=1)
-        
-
-        df_moda['domainlist_2'] = df_moda.apply(lambda row: _sorte_by_domain_moda(
-                        row['domainlist'], 
-                        row['relevance_list'], 
-                        row['count'], self.percent_limit)[:self.submission_size],  axis=1)
-
-
-
-        return df_moda
-
     def run(self):
         os.makedirs(self.output().path)
     
         df: pd.DataFrame = pd.read_csv(self.file)
+        df = df[df['trip_size'] > 0] # TODO Remove
+
         target = 'last_city_id'
-        
+        print(df.head())
         if target in df.columns:
-          df_metric = df[['utrip_id', target]]
+          df_metric = df[['utrip_id', 'last_city_id', 'last_hotel_country']]
 
         df = preprocess_interactions_data_frame(
             df, 
@@ -226,7 +193,7 @@ class EvaluationTask(BaseEvaluationTask):
                 # normalize_dense_features=self.normalize_dense_features,
                 # normalize_file_path=self.normalize_file_path
 
-        data.transform_data_frame(df, "TEST_GENERATOR")
+        df   = data.transform_data_frame(df, "TEST_GENERATOR")
 
         df.to_csv(self.output().path+"/dataset.csv")
 
@@ -242,7 +209,7 @@ class EvaluationTask(BaseEvaluationTask):
         print(df.head())
         print(df.shape)
 
-        reverse_index_mapping    = self.model_training.reverse_index_mapping[target]
+        reverse_index_mapping    = self.model_training.reverse_index_mapping['last_city_id']
         reverse_index_mapping[1] = 0
         
         if self.model_eval == "model":
@@ -252,27 +219,38 @@ class EvaluationTask(BaseEvaluationTask):
         # elif self.model_eval == "coocorrence":
         #     rank_list = self.coocorrence_rank_list(generator, reverse_index_mapping)
 
-        # has target column - Metric
+        # Save metrics
         if target in df.columns:
-          #from IPython import embed; embed()
-          df_metric['reclist']  = list(rank_list)
-          df_metric['acc@4']    = df_metric.apply(lambda row: row[target] in row.reclist[:4], axis=1)
-          
-          metric = {
+            self.save_metrics(df_metric, rank_list)
+        
+        # Save submission
+        np.savetxt(self.output().path+'/submission_{}.csv'.format(self.task_name), rank_list, fmt='%i', delimiter=',') 
+
+    def save_metrics(self, df_metric, rank_list):
+        #from IPython import embed; embed()
+        df_metric['reclist']  = list(rank_list)
+        df_metric['predict']  = df_metric['reclist'].apply(lambda l: l[0])
+        df_metric['acc@4']    = df_metric.apply(lambda row: row['last_city_id'] in row.reclist[:4], axis=1).astype(int)
+        
+        metric = {
             'task_name': self.task_name,
             'count': len(df_metric),
             'acc@4': df_metric['acc@4'].mean()
-          }
+        }
 
-          with open(
-              os.path.join(self.output().path, "metric.json"), "w"
-          ) as params_file:
-              json.dump(metric, params_file, default=lambda o: dict(o), indent=4)
-          print(json.dumps(metric, indent=4))
+        # Save Metrics
+        with open(os.path.join(self.output().path, "metric.json"), "w") as params_file:
+            json.dump(metric, params_file, default=lambda o: dict(o), indent=4)
+        
+        df_metric.to_csv(self.output().path+'/metric.csv', index=False)
 
-          df_metric.to_csv(self.output().path+'/metric.csv', index=False)
+        pd.DataFrame(
+            classification_report(df_metric['last_city_id'], df_metric['predict'], output_dict=True)
+        ).transpose().sort_values('support', ascending=False )  \
+            .to_csv(self.output().path+'/classification_report.csv')
 
-        np.savetxt(self.output().path+'/submission_{}.csv'.format(self.task_name), rank_list, fmt='%i', delimiter=',') 
+        # Print
+        print(json.dumps(metric, indent=4))
 
     def most_popular_rank_list(self, generator, reverse_index_mapping):
         
@@ -387,172 +365,3 @@ class EvaluationTask(BaseEvaluationTask):
                 gc.collect()
         
         return rank_list
-
-# PYTHONPATH="." luigi --module mercado_livre.evaluation EvaluationSubmission \
-# --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
-# --model-task-id SupervisedModelTraining____mars_gym_model_b____e3ae64b091 \
-# --normalize-file-path "226cbf7ae2_std_scaler.pkl" \
-# --history-window 20 \
-# --batch-size 1000 \
-# --local-scheduler \
-# --file "/media/workspace/triplet_session/output/mercado_livre/dataset/test_0.10_test=random_42_SessionInteractionDataFrame_____SessionID_226cbf7ae2.csv"
-
-class EvaluationSubmission(luigi.Task):
-    model_task_class: str = luigi.Parameter(
-        default="mars_gym.simulation.training.SupervisedModelTraining"
-    )
-    model_task_id: str = luigi.Parameter()
-    offpolicy_eval: bool = luigi.BoolParameter(default=False)
-    task_hash: str = luigi.Parameter(default="sub")
-    generator_workers: int = luigi.IntParameter(default=0)
-    pin_memory: bool = luigi.BoolParameter(default=False)
-    batch_size: int = luigi.IntParameter(default=100)
-    device: str = luigi.ChoiceParameter(choices=["cpu", "cuda"], default="cuda")
-    history_window: int = luigi.IntParameter(default=30)
-    normalize_dense_features: int = luigi.Parameter(default="min_max")
-    normalize_file_path: str = luigi.Parameter(default=None)
-    local: bool = luigi.BoolParameter(default=False)
-    sample_size: int = luigi.Parameter(default=1000)
-    percent_limit: float = luigi.FloatParameter(default=0.4)
-    model_eval: str = luigi.ChoiceParameter(choices=["model", "most_popular", "coocorrence"], default="model")
-    eval_reclist: str = luigi.Parameter(default=None)
-    submission_size: int =  luigi.IntParameter(default=10)
-
-    def requires(self):
-        return MLEvaluationTask(model_task_class=self.model_task_class,
-                                model_task_id=self.model_task_id,
-                                normalize_dense_features=self.normalize_dense_features,
-                                normalize_file_path=self.normalize_file_path,
-                                batch_size=self.batch_size,
-                                history_window=self.history_window,
-                                local=self.local,
-                                model_eval=self.model_eval,
-                                sample_size=self.sample_size,
-                                percent_limit=self.percent_limit,
-                                submission_size=self.submission_size), SessionPrepareLocalTestDataset(history_window=self.history_window)
-    
-
-    def output(self):
-        if self.eval_reclist:
-            return luigi.LocalTarget(os.path.join(self.input()[0].path, self.eval_reclist+"_metrics.json"))
-        else:
-            return luigi.LocalTarget(os.path.join(self.input()[0].path, "metrics.json"))
-
-    def run(self):
-        print("\n==> ", self.input()[0].path, "\n")
-        df: pd.DataFrame = pd.read_parquet(self.input()[1][1].path)#.sample(n=self.sample_size, random_state=42, replace=True)#, usecols=['ItemID']).sample(n=self.sample_size, random_state=42, replace=True)
-        df_sub: pd.DataFrame = pd.read_csv(self.input()[0].path+'/df_submission.csv')
-
-        if self.eval_reclist is None:
-            arr_sub: pd.DataFrame = pd.read_csv(self.input()[0].path+'/submission_{}.csv'.format(self.requires()[0].task_name), header=None)
-        else:
-            arr_sub: pd.DataFrame = pd.read_csv(self.eval_reclist, header=None)
-
-        if not self.local:
-            return
-            
-        df['reclist']        = list(arr_sub.values)
-        df['domainlist']     = list(df_sub.domainlist_2.apply(eval))
-        df['relevance_list'] = df.apply(lambda row: _create_relevance_list(row['reclist'], row['ItemID']),  axis=1)
-        df['relevance_list_ml'] = df.apply(lambda row: _create_relevance_list_ml(row['reclist'], row['domainlist'], row['ItemID'], row['domain_idx']),  axis=1)
-
-
-        with Pool(os.cpu_count()) as p:
-            print("Calculating average precision...")
-            df["average_precision"] = list(
-                tqdm(p.map(average_precision, df["relevance_list"]), total=len(df))
-            )
-
-            print("Calculating precision at 1...")
-            df["precision_at_1"] = list(
-                tqdm(
-                    p.map(functools.partial(precision_at_k, k=1), df["relevance_list"]),
-                    total=len(df),
-                )
-            )
-
-            print("Calculating MRR at 5 ...")
-            df["mrr_at_5"] = list(
-                tqdm(
-                    p.map(functools.partial(mean_reciprocal_rank, k=5), df["relevance_list"]),
-                    total=len(df),
-                )
-            )
-
-
-            print("Calculating MRR at 10 ...")
-            df["mrr_at_10"] = list(
-                tqdm(
-                    p.map(functools.partial(mean_reciprocal_rank, k=10), df["relevance_list"]),
-                    total=len(df),
-                )
-            )
-
-            print("Calculating nDCG at 5...")
-            df["ndcg_at_5"] = list(
-                tqdm(
-                    p.map(functools.partial(ndcg_at_k, k=5), df["relevance_list"]),
-                    total=len(df),
-                )
-            )
-            print("Calculating nDCG at 10...")
-            df["ndcg_at_10"] = list(
-                tqdm(
-                    p.map(functools.partial(ndcg_at_k, k=10), df["relevance_list"]),
-                    total=len(df),
-                )
-            )
-            print("Calculating nDCG at 15...")
-            df["ndcg_at_15"] = list(
-                tqdm(
-                    p.map(functools.partial(ndcg_at_k, k=15), df["relevance_list"]),
-                    total=len(df),
-                )
-            )
-            print("Calculating nDCG at 20...")
-            df["ndcg_at_20"] = list(
-                tqdm(
-                    p.map(functools.partial(ndcg_at_k, k=20), df["relevance_list"]),
-                    total=len(df),
-                )
-            )
-            print("Calculating nDCG at 50...")
-            df["ndcg_at_50"] = list(
-                tqdm(
-                    p.map(functools.partial(ndcg_at_k, k=50), df["relevance_list"]),
-                    total=len(df),
-                )
-            )
-
-            print("Calculating nDCGML...")
-            df["ndcg_ml"] = list(
-                tqdm(
-                    p.map(functools.partial(ndcg_ml, k=50), df["relevance_list_ml"]),
-                    total=len(df),
-                )
-            )
-            
-
-        metrics = {
-            "model_task": self.model_task_id,
-            "percent_limit": self.percent_limit,
-            "count": len(df),
-            "mean_average_precision": df["average_precision"].mean(),
-            "precision_at_1": df["precision_at_1"].mean(),
-            "mrr_at_5": df["mrr_at_5"].mean(),
-            "mrr_at_10": df["mrr_at_10"].mean(),
-            "ndcg_at_5": df["ndcg_at_5"].mean(),
-            "ndcg_at_10": df["ndcg_at_10"].mean(),
-            "ndcg_at_15": df["ndcg_at_15"].mean(),
-            "ndcg_at_20": df["ndcg_at_20"].mean(),
-            "ndcg_at_50": df["ndcg_at_50"].mean(),
-            "ndcg_ml": df["ndcg_ml"].mean(),
-        }
-        pprint.pprint(metrics)
-        
-        df.to_csv(os.path.join(self.input()[0].path, "eval_dataset.csv"))
-        with open(
-            os.path.join(self.input()[0].path, "metrics.json"), "w"
-        ) as metrics_file:
-            json.dump(metrics, metrics_file, cls=JsonEncoder, indent=4)
-
