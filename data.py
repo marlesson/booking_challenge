@@ -32,9 +32,9 @@ class SplitTrainTestDataset(luigi.Task):
   # def requires(self):
 
   def output(self):
-      return luigi.LocalTarget(os.path.join(DATASET_DIR, "dataset_train_{}_{}_{}.csv"\
+      return luigi.LocalTarget(os.path.join(DATASET_DIR, "train_{}_{}_{}.csv"\
                   .format(self.sample_days, self.test_days, self.window_trip),)),\
-              luigi.LocalTarget(os.path.join(DATASET_DIR, "dataset_test_{}_{}_{}.csv"\
+              luigi.LocalTarget(os.path.join(DATASET_DIR, "test_{}_{}_{}.csv"\
                   .format(self.sample_days, self.test_days, self.window_trip),))                    
 
   def run(self):
@@ -99,9 +99,8 @@ class SplitTrainTestDataset(luigi.Task):
     df_train = df_trip[(df_trip.start_trip > init_train_timestamp) & (df_trip.start_trip <= init_test_timestamp)]
     df_test  = df_trip[df_trip.start_trip > init_test_timestamp]    
 
-    df_train.to_csv(self.output()[0].path, index=False)
-    df_test.to_csv(self.output()[1].path, index=False)
-
+    df_train.to_csv(self.output()[0].path)
+    df_test.to_csv(self.output()[1].path)
 
 class SessionInteractionDataFrame(BasePrepareDataFrames):
     sample_days: int = luigi.IntParameter(default=30)
