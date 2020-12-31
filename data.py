@@ -173,8 +173,9 @@ class SplitAndPreprocessDataset(luigi.Task):
     print(df_trip_train.shape)
 
     # Filter after
-    df_trip_train = df_trip_train[df_trip_train['trip_size'] > 0]
-    df_trip_test  = df_trip_test[df_trip_test['trip_size'] > 0]
+    # yes, the trips in test set contain at least 4 reservations
+    df_trip_train = df_trip_train[df_trip_train['trip_size'] >= 4]
+    df_trip_test  = df_trip_test[df_trip_test['trip_size'] >= 4]
 
     # Save
     df_trip_train.to_csv(self.output()[0].path, index=False)
@@ -217,6 +218,8 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     #     return DATASET_DIR+'/{}_std_scaler.pkl'.format(self.task_name)
 
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
+        #df = df[df['trip_size'] >= 4]
+        
         # add features
         df['start_trip'] = pd.to_datetime(df['start_trip'])
         df['trip_month'] = df['start_trip'].dt.month

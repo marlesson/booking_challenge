@@ -291,15 +291,15 @@ class NARMModel(RecommenderModule):
         self.month_emb  = nn.Embedding(13, self.n_month_dim)
 
         self.emb_dropout = nn.Dropout(dropout)
-        self.gru = nn.GRU(self.embedding_dim+self.n_month_dim, 
-                            self.hidden_size, self.n_layers)
+        self.gru = nn.GRU(self.embedding_dim + self.n_month_dim, 
+                            self.hidden_size, self.n_layers, bidirectional=True)
 
-        self.a_1 = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
-        self.a_2 = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
-        self.v_t = nn.Linear(self.hidden_size, 1, bias=False)
+        self.a_1 = nn.Linear(self.hidden_size * 2, self.hidden_size * 2, bias=False)
+        self.a_2 = nn.Linear(self.hidden_size, self.hidden_size * 2, bias=False)
+        self.v_t = nn.Linear(self.hidden_size * 2, 1, bias=False)
         
         self.ct_dropout = nn.Dropout(dropout)
-        self.b = nn.Linear(self.embedding_dim, 2 * self.hidden_size, bias=False)
+        self.b = nn.Linear(self.embedding_dim, self.hidden_size * 3, bias=False)
         
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -326,7 +326,7 @@ class NARMModel(RecommenderModule):
         gru_out = gru_out.permute(1, 0, 2)
 
         c_global = ht
-        q1 = self.a_1(gru_out.contiguous().view(-1, self.hidden_size)).view(gru_out.size())  
+        q1 = self.a_1(gru_out.contiguous().view(-1, self.hidden_size * 2)).view(gru_out.size())  
         q2 = self.a_2(ht)
 
         mask      = torch.where(seq.permute(1, 0) > 0, torch.tensor([1.], device = device), 
@@ -336,13 +336,12 @@ class NARMModel(RecommenderModule):
         q2_masked = mask.unsqueeze(2).expand_as(q1) * q2_expand
 
         alpha   = self.v_t(torch.sigmoid(q1 + q2_masked)\
-                    .view(-1, self.hidden_size))\
+                    .view(-1, self.hidden_size * 2))\
                     .view(mask.size())
         c_local = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
 
         c_t     = torch.cat([c_local, c_global], 1)
         c_t     = self.ct_dropout(c_t)
-        
         
         item_embs = self.emb(torch.arange(self._n_items).to(device).long())
         scores  = torch.matmul(c_t, self.b(item_embs).permute(1, 0))
@@ -357,7 +356,7 @@ class NARMModel(RecommenderModule):
         return scores
 
     def init_hidden(self, batch_size):
-        return torch.zeros((self.n_layers, batch_size, self.hidden_size), requires_grad=True)        
+        return torch.zeros((self.n_layers * 2, batch_size, self.hidden_size), requires_grad=True)        
 
 class NARMTimeSpaceModel(RecommenderModule):
     '''
