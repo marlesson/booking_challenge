@@ -92,7 +92,8 @@ mars-gym run supervised --project config.conf1_rnn \
     "window_trip": 5,
     "column_stratification": "user_id",
     "filter_last_step": true,
-    "balance_sample_step": 200000 }' \
+    "balance_sample_step": 250000,
+    "filter_trip_size": 0 }' \
   --test-size 0 \
   --early-stopping-min-delta 0.0001 \
   --learning-rate 0.001 \
@@ -105,7 +106,7 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____1d1ad720cf \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____0027f59fbe \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_500_30_5.csv"  \
 --local-scheduler
 

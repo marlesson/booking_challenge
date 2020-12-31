@@ -174,7 +174,7 @@ class SplitAndPreprocessDataset(luigi.Task):
 
     # Filter after
     # yes, the trips in test set contain at least 4 reservations
-    df_trip_train = df_trip_train[df_trip_train['trip_size'] >= 4]
+    df_trip_train = df_trip_train[df_trip_train['trip_size'] > 0]
     df_trip_test  = df_trip_test[df_trip_test['trip_size'] >= 4]
 
     # Save
@@ -188,6 +188,8 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     filter_last_step: bool = luigi.BoolParameter(default=False)
     balance_sample_step: int = luigi.IntParameter(default=0)
     available_arms_size: int = luigi.IntParameter(default=1)
+    filter_trip_size: int = luigi.IntParameter(default=0)
+
     item_column: str = luigi.Parameter(default="last_city_id")
 
     def requires(self):
@@ -207,6 +209,16 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     def read_data_frame_path(self) -> pd.DataFrame:
         return self.input()[0].path
 
+    def read_data_frame(self) -> pd.DataFrame:
+        df = pd.read_csv(self.read_data_frame_path)#.sample(10000)
+
+        if self.filter_trip_size > 0:
+            df = df[df['trip_size'] >= self.filter_trip_size]
+        
+        print(df.shape)
+
+        return df
+
     # @property
     # def task_name(self):
     #     return self.task_id.split("_")[-1]
@@ -218,7 +230,7 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     #     return DATASET_DIR+'/{}_std_scaler.pkl'.format(self.task_name)
 
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
-        #df = df[df['trip_size'] >= 4]
+        #
         
         # add features
         df['start_trip'] = pd.to_datetime(df['start_trip'])
