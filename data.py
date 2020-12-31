@@ -79,6 +79,7 @@ class SplitAndPreprocessDataset(luigi.Task):
         step_list=('step', list_without_last_and_pad(self.window_trip, int)),
         last_city_id=('city_id', 'last'),
         last_hotel_country=('hotel_country', 'last'),
+        country_count=('country_count', 'min'),
     )
 
     #df_trip['end_trip']  = df_trip['checkout_list'].apply(lambda x: x[-1] if len(x) > 1 else None)
@@ -143,13 +144,19 @@ class SplitAndPreprocessDataset(luigi.Task):
     # TODO Garantir que o usuário fique com a sessão no train ou test
     df_train = df[(df.checkout >= init_train_timestamp) & (df.checkout < init_test_timestamp)]
     df_test  = df[df.checkout >= init_test_timestamp]    
-   
+
     # Add General Features
     self.add_general_features(df_train)
     self.add_general_features(df_test)
 
     # Filter 
     df_train = self.filter_train_data(df_train)
+    
+    # add country_count
+    df_country_count = df_train.groupby(['hotel_country']).agg(country_count=('user_id','count')).reset_index()
+    print(df_country_count.head())
+    df_train = df_train.merge(df_country_count, on='hotel_country', how='left')
+    df_test['country_count'] = 1
 
     print(df_train.head())
     print(df_train.shape)
@@ -177,10 +184,10 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     sample_days: int = luigi.IntParameter(default=500)
     test_days: int = luigi.IntParameter(default=7)
     window_trip: int = luigi.IntParameter(default=5)
-    item_column: str = luigi.Parameter(default="last_city_id")
-
     filter_last_step: bool = luigi.BoolParameter(default=False)
     balance_sample_step: int = luigi.IntParameter(default=0)
+    available_arms_size: int = luigi.IntParameter(default=1)
+    item_column: str = luigi.Parameter(default="last_city_id")
 
     def requires(self):
         return SplitAndPreprocessDataset(sample_days=self.sample_days, 
@@ -210,13 +217,13 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     #     return DATASET_DIR+'/{}_std_scaler.pkl'.format(self.task_name)
 
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
-        # Filter
-        df = df[df['trip_size'] > 0]
+        # add features
+        df['start_trip'] = pd.to_datetime(df['start_trip'])
+        df['trip_month'] = df['start_trip'].dt.month
 
-        df_last_step = df.sort_values(['utrip_id', 'trip_size'])\
+        #
+        df_last_step = df.sort_values(['utrip_id', 'trip_size']).reset_index()\
                           .groupby(['utrip_id']).last().reset_index()
-
-        
 
         if data_key == 'TEST_GENERATOR': 
             df = df_last_step
@@ -226,11 +233,11 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
                 _val_size = 1.0/self.n_splits if self.dataset_split_method == "k_fold" else self.val_size
 
                 if data_key == 'VALIDATION_DATA':
-                    _sample_view_size = int(self.sample_view * _val_size)
+                    _sample_view_size = int(self.balance_sample_step * _val_size)
                 else:
-                    _sample_view_size = int(self.sample_view * (1-_val_size))
+                    _sample_view_size = int(self.balance_sample_step * (1-_val_size))
                 
-                df_steps = df # Filter only step midde
+                df_steps = df[~df.index.isin(df_last_step['index'])] # Filter only step midde
                 df_steps = self.sample_balance_df(df_steps, _sample_view_size) # view
 
                 df = pd.concat([df_last_step, df_steps]).drop_duplicates(subset = ['utrip_id', 'trip_size'], keep = 'first')
@@ -240,6 +247,5 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
         return df
     
     def sample_balance_df(self, df, n_samples, state=42):
-        return df.sample(n_samples, random_state=state)
-        #df['sample_weights'] = 1/df['country_count']
-        #return df.sample(n_samples, weights='sample_weights', random_state=state)
+        df['sample_weights'] = 1/df['country_count']
+        return df.sample(n_samples, weights='sample_weights', random_state=state)
