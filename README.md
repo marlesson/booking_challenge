@@ -80,7 +80,7 @@ mars-gym run supervised --project config.conf1_rnn \
   --recommender-module-class model.NARMModel \
   --recommender-extra-params '{
     "n_factors": 100, 
-    "hidden_size": 100, 
+    "hidden_size": 200, 
     "n_layers": 1, 
     "dropout": 0.25, 
     "from_index_mapping": false,
@@ -105,7 +105,7 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____6d427e2852 \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____1d1ad720cf \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_500_30_5.csv"  \
 --local-scheduler
 

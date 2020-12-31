@@ -71,7 +71,6 @@ class TimeEmbedding(nn.Module):
         x = torch.matmul(x, self.emb_time) # (B, W, E)
         return x
 
-
 class GRURecModel(RecommenderModule):
     def __init__(
         self,
@@ -285,10 +284,10 @@ class NARMModel(RecommenderModule):
         self.n_time_dim     = 100
         self.n_month_dim    = 10
 
-        self.emb        = load_embedding(self._n_items, n_factors, path_item_embedding, 
+        self.emb         = load_embedding(self._n_items, n_factors, path_item_embedding, 
                                         from_index_mapping, index_mapping, freeze_embedding)
-        self.time_emb   = TimeEmbedding(self.n_time_dim, n_factors)
-        self.month_emb  = nn.Embedding(13, self.n_month_dim)
+        self.time_emb    = TimeEmbedding(self.n_time_dim, n_factors)
+        self.month_emb   = nn.Embedding(13, self.n_month_dim)
 
         self.emb_dropout = nn.Dropout(dropout)
         self.gru = nn.GRU(self.embedding_dim + self.n_month_dim, 
@@ -301,8 +300,6 @@ class NARMModel(RecommenderModule):
         self.ct_dropout = nn.Dropout(dropout)
         self.b = nn.Linear(self.embedding_dim, self.hidden_size * 3, bias=False)
         
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
     def forward(self, session_ids, item_ids, item_history_ids, duration_list, trip_month):
         device = item_ids.device
         seq    = item_history_ids.permute(1,0)  #TODO
@@ -357,6 +354,7 @@ class NARMModel(RecommenderModule):
 
     def init_hidden(self, batch_size):
         return torch.zeros((self.n_layers * 2, batch_size, self.hidden_size), requires_grad=True)        
+
 
 class NARMTimeSpaceModel(RecommenderModule):
     '''
