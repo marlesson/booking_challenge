@@ -71,6 +71,209 @@ class TimeEmbedding(nn.Module):
         x = torch.matmul(x, self.emb_time) # (B, W, E)
         return x
 
+
+# Temporarily leave PositionalEncoding module here. Will be moved somewhere else.
+class PositionalEncoding(nn.Module):
+    r"""Inject some information about the relative or absolute position of the tokens
+        in the sequence. The positional encodings have the same dimension as
+        the embeddings, so that the two can be summed. Here, we use sine and cosine
+        functions of different frequencies.
+    .. math::
+        \text{PosEncoder}(pos, 2i) = sin(pos/10000^(2i/d_model))
+        \text{PosEncoder}(pos, 2i+1) = cos(pos/10000^(2i/d_model))
+        \text{where pos is the word position and i is the embed idx)
+    Args:
+        d_model: the embed dim (required).
+        dropout: the dropout value (default=0.1).
+        max_len: the max. length of the incoming sequence (default=5000).
+    Examples:
+        >>> pos_encoder = PositionalEncoding(d_model)
+    """
+
+    def __init__(self, d_model, dropout=0.1, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        self.dropout = nn.Dropout(p=dropout)
+
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        r"""Inputs of forward function
+        Args:
+            x: the sequence fed to the positional encoder model (required).
+        Shape:
+            x: [sequence length, batch size, embed dim]
+            output: [sequence length, batch size, embed dim]
+        Examples:
+            >>> output = pos_encoder(x)
+        """
+
+        x = x + self.pe[:x.size(0), :]
+        return self.dropout(x)
+
+# --------------------------
+
+class MLTransformerModel(RecommenderModule):
+    def __init__(
+        self,
+        project_config: ProjectConfig,
+        index_mapping: Dict[str, Dict[Any, int]],
+        n_factors: int,
+        n_hid: int,
+        n_head: int,
+        n_layers: int,
+        num_filters: int,
+        path_item_embedding: str,
+        from_index_mapping: str,
+        dropout: float,
+        hist_size: int,
+        freeze_embedding: bool
+    ):
+        super().__init__(project_config, index_mapping)
+        self.path_item_embedding = path_item_embedding
+        
+        filter_sizes: List[int] = [3, 4, 5]# [1, 3, 5] #1 3 5
+        self.n_time_dim  = 100
+        self.n_month_dim = 10
+        self.item_emb = load_embedding(self._n_items, n_factors, path_item_embedding, 
+                                                from_index_mapping, index_mapping, freeze_embedding)
+        self.emb_drop = nn.Dropout(p=dropout)
+        self.dropout  = nn.Dropout(p=dropout)
+
+        n_factors_2 = n_factors #+ self.n_month_dim
+
+        self.pos_encoder    = PositionalEncoding(n_factors_2, dropout)
+        encoder_layers      =  nn.TransformerEncoderLayer(n_factors_2, n_head, n_hid, dropout)
+        self.transformer_encoder =  nn.TransformerEncoder(encoder_layers, n_layers)
+
+        self.time_emb    = TimeEmbedding(self.n_time_dim, n_factors)
+        self.month_emb   = nn.Embedding(13, self.n_month_dim)
+
+        # self.convs = nn.ModuleList(
+        #     [nn.Conv1d(1, num_filters, K*n_factors_2, stride=n_factors_2) for K in filter_sizes])
+
+        # conv_size_out = len(filter_sizes) * num_filters
+        #conv_size_out = n_factors_2*hist_size
+        # self.dense = nn.Sequential(
+        #     nn.BatchNorm1d(conv_size_out + n_factors),
+        #     nn.Linear(conv_size_out + n_factors, conv_size_out + n_factors),
+        #     nn.ReLU(),
+        #     nn.Linear(conv_size_out + n_factors, n_factors),
+        # )
+        # self.d1 = nn.Sequential(
+        #     nn.BatchNorm1d(n_factors * hist_size),
+        #     nn.Linear(n_factors * hist_size, n_factors),
+        # )
+
+        # self.d2 = nn.Sequential(
+        #     nn.BatchNorm1d(n_factors),
+        #     nn.Linear(n_factors, n_factors),
+        #     nn.ReLU()
+        # )
+        self.activate_func = nn.ReLU()
+        self.dense = nn.Sequential(
+            nn.BatchNorm1d(n_factors_2 * hist_size),
+            nn.Linear(n_factors_2 * hist_size, n_factors),
+            self.activate_func,
+            nn.Linear(n_factors, n_factors),
+            self.activate_func
+        )
+        self.b = nn.Linear(n_factors, n_factors)
+
+        self.use_normalize = False
+        self.weight_init = lecun_normal_init
+        self.apply(self.init_weights)
+
+    def init_weights(self, module: nn.Module):
+        if type(module) == nn.Linear:
+            self.weight_init(module.weight)
+            module.bias.data.fill_(0.1)
+    
+    #We can then build a convenient cloning function that can generate multiple layers:
+    def get_clones(self, module, N):
+        return nn.ModuleList([copy.deepcopy(module) for i in range(N)])
+            
+    def layer_transform(self, x, mask=None):
+        for i in range(self.transform_n):
+            x = self.layers[i](x, mask)
+        x = self.norm(x)
+        return x            
+
+    def flatten(self, input):
+        return input.view(input.size(0), -1)
+
+    def normalize(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
+        if self.use_normalize:
+            x = F.normalize(x, p=2, dim=dim)
+        return x
+    
+    def src_mask(self, sz):
+        mask = (torch.triu(torch.ones(sz, sz)) == 1).transpose(0, 1)
+        mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
+        return mask
+
+    def layer_transformer(self, src, mask_hist):
+        # Create transform mask
+        mask          = self.src_mask(len(src)).to(src.device)
+        src           = self.pos_encoder(src*mask_hist)
+        att_hist_emb  = self.transformer_encoder(src, mask) # (B, H, E)
+        
+        return att_hist_emb
+
+    def forward(self, session_ids, item_ids, item_history_ids, duration_list, trip_month, first_hotel_country):
+        # Item History embs
+        item_hist_emb   =   self.emb_drop(
+                                self.normalize(self.item_emb(item_history_ids), 2)
+                            )#[0] # (B, H, E)
+        
+        # Time/Month Embs
+        #m_emb   = self.emb_drop(self.month_emb(trip_month.long()))
+        #m_embs  = m_emb.unsqueeze(1).expand(item_history_ids.shape[0], item_history_ids.shape[1], self.n_month_dim)
+
+        # Add Time
+        #t_embs  = self.time_emb(duration_list.float().unsqueeze(2))  # (H, B, E)
+        #item_hist_emb    = (item_hist_emb + t_embs)/2
+        
+        #item_hist_emb    = torch.cat([item_hist_emb, m_embs], 2)      
+
+        # Mask history
+        mask_hist   = (item_history_ids != 0).to(item_history_ids.device).float()
+        mask_hist   = mask_hist.unsqueeze(1).repeat((1,item_hist_emb.size(2),1)).permute(0,2,1)
+
+        # Create transform mask
+        att_hist_emb = self.layer_transformer(item_hist_emb, mask_hist) # (B, H, E)
+
+        # Add time emb
+        hist_conv   = att_hist_emb
+        
+        # Last Item
+        last_item   = item_hist_emb[:,0]
+
+        #join        = torch.cat([self.d2(last_item), 
+        #                        self.flatten(hist_conv)], 1)
+        join        = self.flatten(hist_conv)
+
+        pred_emb    = self.dense(join) # (B, E)
+        pred_emb    = self.dropout(pred_emb)
+        # Predict
+
+        item_embs   = self.item_emb(torch.arange(self._n_items).to(item_history_ids.device).long()) # (Dim, E)
+        scores      = torch.matmul(pred_emb, self.b(item_embs).permute(1, 0)) # (B, dim)
+
+        return scores
+
+    def recommendation_score(self, session_ids, item_ids, item_history_ids, duration_list, trip_month, first_hotel_country):
+        
+        scores = self.forward(session_ids, item_ids, item_history_ids, duration_list, trip_month, first_hotel_country)
+        scores = scores[torch.arange(scores.size(0)),item_ids]
+
+        return scores
+
 class GRURecModel(RecommenderModule):
     def __init__(
         self,
@@ -283,39 +486,72 @@ class NARMModel(RecommenderModule):
         self.embedding_dim  = n_factors
         self.n_time_dim     = 100
         self.n_month_dim    = 10
+        
+        n_hotel_country_list_dim   = self.index_mapping_max_value('hotel_country_list')
 
         self.emb         = load_embedding(self._n_items, n_factors, path_item_embedding, 
                                         from_index_mapping, index_mapping, freeze_embedding)
         self.time_emb    = TimeEmbedding(self.n_time_dim, n_factors)
         self.month_emb   = nn.Embedding(13, self.n_month_dim)
+        self.emb_country = nn.Embedding(n_hotel_country_list_dim, n_factors)
 
         self.emb_dropout = nn.Dropout(dropout)
-        self.gru = nn.GRU(self.embedding_dim + self.n_month_dim, 
+        self.gru = nn.GRU(self.embedding_dim * 1 + self.n_month_dim, 
                             self.hidden_size, self.n_layers, bidirectional=True)
 
         self.a_1 = nn.Linear(self.hidden_size * 2, self.hidden_size * 2, bias=False)
         self.a_2 = nn.Linear(self.hidden_size, self.hidden_size * 2, bias=False)
         self.v_t = nn.Linear(self.hidden_size * 2, 1, bias=False)
-        
+
+        self.activate_func = nn.SELU()
+        n_dense_features  = 0#11
+        output_dense_size = self.hidden_size * 3 + n_dense_features 
+
+        # self.mlp_dense = nn.Sequential(
+        #     nn.Linear(n_dense_features, n_dense_features),
+        #     self.activate_func,
+        #     nn.Linear(n_dense_features, n_dense_features),
+        # )
+
+        # self.mlp_emb_features = nn.Sequential(
+        #     nn.Linear(1 * n_factors + self.n_month_dim, n_factors),
+        #     self.activate_func,
+        #     nn.Linear(n_factors, n_factors),
+        # )
+
         self.ct_dropout = nn.Dropout(dropout)
-        self.b = nn.Linear(self.embedding_dim, self.hidden_size * 3, bias=False)
+        self.b = nn.Linear(self.embedding_dim, output_dense_size, bias=False)
         
-    def forward(self, session_ids, item_ids, item_history_ids, duration_list, trip_month):
+    def index_mapping_max_value(self, key: str) -> int:
+        return max(self._index_mapping[key].values())+1
+
+    def forward(self, session_ids, 
+                        item_ids, 
+                        item_history_ids, 
+                        hotel_country_list,
+                        duration_list, 
+                        trip_month, 
+                        dense_features):
         device = item_ids.device
         seq    = item_history_ids.permute(1,0)  #TODO
+        seq_country = hotel_country_list.permute(1,0)
 
         hidden  = self.init_hidden(seq.size(1)).to(device)
         embs    = self.emb_dropout(self.emb(seq))
-        
+        #country_embs = self.emb_dropout(self.emb_country(seq_country))
+        #emb_first_hotel_country = self.emb_country(first_hotel_country)
+
         # Time/Month Embs
-        m_embs  = self.emb_dropout(self.month_emb(trip_month.long()))
-        m_embs  = m_embs.unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
+        m_emb   = self.emb_dropout(self.month_emb(trip_month.long()))
+        m_embs  = m_emb.unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
         # Add Time
         t_embs  = self.time_emb(duration_list.float().unsqueeze(2)).permute(1,0,2)  # (H, B, E)
         embs    = (embs + t_embs)/2
 
+        # Join
         embs    = torch.cat([embs, m_embs], 2)      
+        
         gru_out, hidden = self.gru(embs, hidden)
 
         # fetch the last hidden state of last timestamp
@@ -337,17 +573,32 @@ class NARMModel(RecommenderModule):
                     .view(mask.size())
         c_local = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
 
-        c_t     = torch.cat([c_local, c_global], 1)
+        # e_features  = self.mlp_emb_features(torch.cat([emb_first_hotel_country, 
+        #d_features = self.mlp_dense(dense_features.float())
+
+        c_t     = torch.cat([c_local,c_global], 1)
         c_t     = self.ct_dropout(c_t)
         
         item_embs = self.emb(torch.arange(self._n_items).to(device).long())
-        scores  = torch.matmul(c_t, self.b(item_embs).permute(1, 0))
+        scores    = torch.matmul(c_t, self.b(item_embs).permute(1, 0))
 
         return scores
 
-    def recommendation_score(self, session_ids, item_ids, item_history_ids, duration_list, trip_month):
+    def recommendation_score(self, session_ids, 
+                                    item_ids, 
+                                    item_history_ids, 
+                                    hotel_country_list,
+                                    duration_list, 
+                                    trip_month, 
+                                    dense_features):
         
-        scores = self.forward(session_ids, item_ids, item_history_ids, duration_list, trip_month)
+        scores = self.forward(session_ids, 
+                                item_ids, 
+                                item_history_ids, 
+                                hotel_country_list,
+                                duration_list, 
+                                trip_month, 
+                                dense_features)
         scores = scores[torch.arange(scores.size(0)),item_ids]
 
         return scores

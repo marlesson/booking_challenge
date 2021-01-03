@@ -24,6 +24,8 @@ DATASET_DIR: str = os.path.join(OUTPUT_PATH, "booking", "dataset")
 
 BASE_DATASET_FILE : str = os.path.join("data", "Booking", "booking_train_set.csv")
 
+LIMIT_DURATION_SUM = 22
+LIMIT_TRIP_SIZE    = 10
 
 def count_hotel(hotel_country):
     return len(list(np.unique(hotel_country)))
@@ -55,9 +57,10 @@ class SplitAndPreprocessDataset(luigi.Task):
 
   def add_general_features(self, df):
 
-    df['duration'] = (df['checkout'] - df['checkin']).dt.days
-    df['checkin_str']   = df['checkin'].astype(str)
-    df['checkout_str']  = df['checkout'].astype(str)
+    df['duration']        = (df['checkout'] - df['checkin']).dt.days
+    df['checkin_str']     = df['checkin'].astype(str)
+    df['checkout_str']    = df['checkout'].astype(str)
+    df['days_since_2016'] = pd.to_datetime(df['checkin']).sub(pd.Timestamp('2016-01-01 00:00:00')).dt.days
     df['step'] = 1
     df['step'] = df.groupby(['utrip_id']).step.cumsum()
 
@@ -70,6 +73,7 @@ class SplitAndPreprocessDataset(luigi.Task):
         end_trip=('checkin', 'last'),
         checkin_list=('checkin_str', list_without_last_and_pad(self.window_trip, str)),
         checkout_list=('checkout_str', list_without_last_and_pad(self.window_trip, str)),
+        days_since_2016_list=('days_since_2016', list_without_last_and_pad(self.window_trip, int)),
         duration_list=('duration', list_without_last_and_pad(self.window_trip, int)),
         city_id_list=('city_id', list_without_last_and_pad(self.window_trip, str)),
         device_class_list=('device_class', list_without_last_and_pad(self.window_trip, str)),
@@ -77,17 +81,19 @@ class SplitAndPreprocessDataset(luigi.Task):
         booker_country_list=('booker_country', list_without_last_and_pad(self.window_trip, str)),
         hotel_country_list=('hotel_country', list_without_last_and_pad(self.window_trip, str)),
         step_list=('step', list_without_last_and_pad(self.window_trip, int)),
+        first_city_id=('city_id', 'first'),
+        first_hotel_country=('hotel_country', 'first'),
         last_city_id=('city_id', 'last'),
         last_hotel_country=('hotel_country', 'last'),
         country_count=('country_count', 'min'),
     )
 
     #df_trip['end_trip']  = df_trip['checkout_list'].apply(lambda x: x[-1] if len(x) > 1 else None)
-    df_trip['duration']  = (df_trip['end_trip'] - df_trip['start_trip']).dt.days
+    #df_trip['duration']  = (df_trip['end_trip'] - df_trip['start_trip']).dt.days
 
     # Fix results without last interaction
-    df_trip['trip_size'] = df_trip['trip_size'] - 1
-    df_trip['duration']  = df_trip['duration_list'].apply(sum)
+    df_trip['trip_size']     = df_trip['trip_size'] - 1
+    df_trip['duration_sum']  = df_trip['duration_list'].apply(sum)
 
     return df_trip.reset_index()
 
@@ -99,10 +105,10 @@ class SplitAndPreprocessDataset(luigi.Task):
     )
 
     # default values cames from EDA.ipynb
-    df_trip = df_trip[(df_trip['trip_size'] < 10) & 
+    df_trip = df_trip[(df_trip['trip_size'] < LIMIT_TRIP_SIZE) & 
                       (df_trip['trip_size'] > 0) & 
-                      (df_trip['duration_sum'] < 22)]
-    
+                      (df_trip['duration_sum'] < LIMIT_DURATION_SUM)]
+
     # Filter
     df = df[df['utrip_id'].isin(list(df_trip.index))]
 
@@ -230,13 +236,48 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     #     return DATASET_DIR+'/{}_std_scaler.pkl'.format(self.task_name)
 
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
-        #
-        
+        #from IPython import embed; embed()
+
+        # transform array
+        for c in ['hotel_country_list', 'duration_list']:
+            if len(df) > 0 and isinstance(df.iloc[0][c],str):
+                df[c] = df[c].apply(eval)
+
+
         # add features
         df['start_trip'] = pd.to_datetime(df['start_trip'])
-        df['trip_month'] = df['start_trip'].dt.month
+        df['start_trip_quarter']    = df['start_trip'].dt.quarter
+        df['start_trip_month']      = df['start_trip'].dt.month
+        df['start_trip_day']        = df['start_trip'].dt.dayofyear
+        df['start_trip_week']       = df['start_trip'].dt.dayofweek
+        df['start_trip_is_weekend'] = df['start_trip'].dt.day_name().apply(lambda x : 1 if x in ['Saturday','Sunday'] else 0)
 
-        #
+        # Dense Features
+        dense_features = ['is_multiple_country', 'trip_size', 'duration_sum']
+
+        dense_features = [
+            'start_trip_is_weekend', 'start_trip_quarter_sin', 'start_trip_quarter_cos', 
+            'start_trip_month_sin', 'start_trip_month_cos', 
+            'start_trip_day_sin', 'start_trip_day_cos', 
+            'start_trip_week_sin', 'start_trip_week_cos']
+
+
+        df['start_trip_quarter_sin']    = np.sin(2 * np.pi * df['start_trip_quarter']/4)
+        df['start_trip_quarter_cos']    = np.cos(2 * np.pi * df['start_trip_quarter']/4)
+        df['start_trip_month_sin']      = np.sin(2 * np.pi * df['start_trip_month']/12)
+        df['start_trip_month_cos']      = np.cos(2 * np.pi * df['start_trip_month']/12)
+        df['start_trip_day_sin']        = np.sin(2 * np.pi * df['start_trip_day']/365)
+        df['start_trip_day_cos']        = np.cos(2 * np.pi * df['start_trip_day']/365)
+        df['start_trip_week_sin']       = np.sin(2 * np.pi * df['start_trip_week']/6)
+        df['start_trip_week_cos']       = np.cos(2 * np.pi * df['start_trip_week']/6)
+
+        df['is_multiple_country'] = df['hotel_country_list'].apply(lambda x: len(list(np.unique(x))) > 1 ).astype(int)
+        df['trip_size']     = df['trip_size']/LIMIT_TRIP_SIZE
+        df['duration_sum']  = df['duration_list'].apply(sum)/(LIMIT_DURATION_SUM*5)
+
+        df['dense_features'] = df[dense_features].values.tolist()
+
+        # group by u_trip
         df_last_step = df.sort_values(['utrip_id', 'trip_size']).reset_index()\
                           .groupby(['utrip_id']).last().reset_index()
 

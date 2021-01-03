@@ -115,6 +115,8 @@ class EvaluationTask(BaseEvaluationTask):
     normalize_dense_features: int = luigi.Parameter(default="min_max")
     normalize_file_path: str = luigi.Parameter(default=None)
     file: str = luigi.Parameter(default="")
+    neighbors_file: str = luigi.Parameter(default=None)
+
     model_eval: str = luigi.ChoiceParameter(choices=["model", "most_popular", "coocorrence"], default="model")
 
     sample_size: int = luigi.Parameter(default=1000)
