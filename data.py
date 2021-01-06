@@ -64,9 +64,14 @@ class SplitAndPreprocessDataset(luigi.Task):
     df['step'] = 1
     df['step'] = df.groupby(['utrip_id']).step.cumsum()
 
+    df['user_trip_count'] = 1
+    df['user_trip_count'] = df.groupby(['user_id']).user_trip_count.cumsum()
+    df['is_new_user']     = df['user_trip_count'].apply(lambda x: x > 1).astype(int)
+
   def group_by_trip(self, df):
     df_trip = df.sort_values(['step']).groupby(['utrip_id']).agg(
         user_id=('user_id', 'first'),
+        user_features=('user_features', 'first'),
         count_unique_city=('city_id', count_hotel),
         trip_size=('checkin', len),
         start_trip=('checkin', 'first'),
@@ -139,6 +144,11 @@ class SplitAndPreprocessDataset(luigi.Task):
                     dtype={"user_id": str, "city_id": str, 'affiliate_id': str,'utrip_id': str}, 
                     parse_dates=['checkin', 'checkout'])
     
+    df_user = pd.read_csv(os.path.join(DATASET_DIR, "all_user_features.csv"), 
+                    dtype={"user_id": str}, usecols=["user_id", 'user_features'])
+    
+    df = df.merge(df_user, on='user_id')
+
     print(df.head())
     print(df.shape)
 

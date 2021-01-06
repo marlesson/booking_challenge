@@ -31,6 +31,7 @@ conf1_rnn = ProjectConfig(
     item_column=Column("last_city_id", IOType.INDEXABLE),
     timestamp_column_name="start_trip",
     other_input_columns=[
+        Column("user_features", IOType.INT_ARRAY), 
         Column("city_id_list", IOType.INDEXABLE_ARRAY, same_index_as="last_city_id"),
         Column("hotel_country_list", IOType.INDEXABLE_ARRAY),
         Column("duration_list", IOType.INT_ARRAY), #days_since_2016_list

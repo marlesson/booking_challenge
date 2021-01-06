@@ -71,6 +71,94 @@ class TimeEmbedding(nn.Module):
         x = torch.matmul(x, self.emb_time) # (B, W, E)
         return x
 
+class Attention(nn.Module):
+    """ Applies attention mechanism on the `context` using the `query`.
+
+    **Thank you** to IBM for their initial implementation of :class:`Attention`. Here is
+    their `License
+    <https://github.com/IBM/pytorch-seq2seq/blob/master/LICENSE>`__.
+
+    Args:
+        dimensions (int): Dimensionality of the query and context.
+        attention_type (str, optional): How to compute the attention score:
+
+            * dot: :math:`score(H_j,q) = H_j^T q`
+            * general: :math:`score(H_j, q) = H_j^T W_a q`
+
+    Example:
+
+         >>> attention = Attention(256)
+         >>> query = torch.randn(5, 1, 256)
+         >>> context = torch.randn(5, 5, 256)
+         >>> output, weights = attention(query, context)
+         >>> output.size()
+         torch.Size([5, 1, 256])
+         >>> weights.size()
+         torch.Size([5, 1, 5])
+    """
+
+    def __init__(self, dimensions, attention_type='general'):
+        super(Attention, self).__init__()
+
+        if attention_type not in ['dot', 'general']:
+            raise ValueError('Invalid attention type selected.')
+
+        self.attention_type = attention_type
+        if self.attention_type == 'general':
+            self.linear_in = nn.Linear(dimensions, dimensions, bias=False)
+
+        self.linear_out = nn.Linear(dimensions * 2, dimensions, bias=False)
+        self.softmax = nn.Softmax(dim=-1)
+        self.tanh = nn.Tanh()
+
+    def forward(self, query, context):
+        """
+        Args:
+            query (:class:`torch.FloatTensor` [batch size, output length, dimensions]): Sequence of
+                queries to query the context.
+            context (:class:`torch.FloatTensor` [batch size, query length, dimensions]): Data
+                overwhich to apply the attention mechanism.
+
+        Returns:
+            :class:`tuple` with `output` and `weights`:
+            * **output** (:class:`torch.LongTensor` [batch size, output length, dimensions]):
+              Tensor containing the attended features.
+            * **weights** (:class:`torch.FloatTensor` [batch size, output length, query length]):
+              Tensor containing attention weights.
+        """
+        batch_size, output_len, dimensions = query.size()
+        query_len = context.size(1)
+
+        if self.attention_type == "general":
+            query = query.reshape(batch_size * output_len, dimensions)
+            query = self.linear_in(query)
+            query = query.reshape(batch_size, output_len, dimensions)
+
+        # TODO: Include mask on PADDING_INDEX?
+
+        # (batch_size, output_len, dimensions) * (batch_size, query_len, dimensions) ->
+        # (batch_size, output_len, query_len)
+        attention_scores = torch.bmm(query, context.transpose(1, 2).contiguous())
+
+        # Compute weights across every context sequence
+        attention_scores = attention_scores.view(batch_size * output_len, query_len)
+        attention_weights = self.softmax(attention_scores)
+        attention_weights = attention_weights.view(batch_size, output_len, query_len)
+
+        # (batch_size, output_len, query_len) * (batch_size, query_len, dimensions) ->
+        # (batch_size, output_len, dimensions)
+        mix = torch.bmm(attention_weights, context)
+
+        # concat -> (batch_size * output_len, 2*dimensions)
+        combined = torch.cat((mix, query), dim=2)
+        combined = combined.view(batch_size * output_len, 2 * dimensions)
+
+        # Apply linear_out on every 2nd dimension of concat
+        # output -> (batch_size, output_len, dimensions)
+        output = self.linear_out(combined).view(batch_size, output_len, dimensions)
+        output = self.tanh(output)
+
+        return output, attention_weights
 
 # Temporarily leave PositionalEncoding module here. Will be moved somewhere else.
 class PositionalEncoding(nn.Module):
@@ -334,6 +422,116 @@ class GRURecModel(RecommenderModule):
 
         return scores
 
+
+class RNNAttModel(RecommenderModule):
+    def __init__(
+        self,
+        project_config: ProjectConfig,
+        index_mapping: Dict[str, Dict[Any, int]],
+        n_factors: int,
+        hidden_size: int,
+        n_layers: int,
+        path_item_embedding: str,
+        from_index_mapping: str,
+        dropout: float,
+        freeze_embedding: bool
+    ):
+        super().__init__(project_config, index_mapping)
+        self.path_item_embedding = path_item_embedding
+        self.dropout = dropout
+        self.hidden_size = hidden_size 
+        self.n_layers = n_layers
+        self.n_factors = n_factors
+
+        self.n_time_dim  = 100
+        self.n_month_dim = 10
+
+        self.emb_dropout = nn.Dropout(self.dropout)
+        self.emb_time    = TimeEmbedding(self.n_time_dim, n_factors)
+        self.emb_month   = nn.Embedding(13, self.n_month_dim)
+        self.emb_user    = nn.Embedding(self._n_users, n_factors)
+
+        self.emb_item    = load_embedding(self._n_items, n_factors, path_item_embedding, 
+                                        from_index_mapping, index_mapping, freeze_embedding)
+
+        self.gru = nn.GRU(n_factors, self.hidden_size, self.n_layers, 
+                            dropout=self.dropout, bidirectional=True)
+        
+        #self.out = nn.Linear(self.hidden_size * 2, self._n_items)
+        self.sf  = nn.Softmax()
+        self.att_1 = Attention(n_factors)
+        self.b   = nn.Linear(self.n_factors, self.hidden_size * 2 * 5, bias=False)
+
+        self.weight_init = lecun_normal_init
+        #self.apply(self.init_weights)
+
+    def init_weights(self, module: nn.Module):
+        if type(module) == nn.Linear:
+            self.weight_init(module.weight)
+            module.bias.data.fill_(0.1)
+            
+    def flatten(self, input):
+        return input.view(input.size(0), -1)
+
+    def normalize(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
+        if self.use_normalize:
+            x = F.normalize(x, p=2, dim=dim)
+        return x
+
+    def forward(self, session_ids, 
+                        item_ids, 
+                        user_features,
+                        item_history_ids, 
+                        hotel_country_list,
+                        duration_list, 
+                        trip_month, 
+                        dense_features):
+
+        embs       = self.emb_dropout(self.emb_item(item_history_ids))
+        
+        # # Add Month
+        # embs_month = self.emb_month(trip_month.long())
+        # embs_month = embs_month.unsqueeze(1).expand(item_history_ids.shape[0], item_history_ids.shape[1], self.n_month_dim)
+        # embs    = torch.cat([embs, embs_month], 2)      
+
+
+        # Add Time
+        embs_time   = self.emb_time(duration_list.float().unsqueeze(2))  # (B, H, E)
+        embs        = (embs + embs_time)/2
+
+        embs, att_w = self.att_1(embs, embs)
+
+        output, hidden = self.gru(embs)
+        out        = output.contiguous().view(-1, self.hidden_size*2*5) #output[:,-1] 
+        #out       = torch.cat([out, c_global], 1)
+        #output.contiguous().view(-1, self.hidden_size * 2)).view(output.size())
+
+        item_embs = self.emb_item(torch.arange(self._n_items).to(item_history_ids.device).long())
+        scores    = torch.matmul(out, self.b(item_embs).permute(1, 0))
+
+        return scores
+
+    def recommendation_score(self, session_ids, 
+                        item_ids, 
+                        user_features,
+                        item_history_ids, 
+                        hotel_country_list,
+                        duration_list, 
+                        trip_month, 
+                        dense_features):
+        
+        scores = self.forward(session_ids, 
+                        item_ids, 
+                        user_features,
+                        item_history_ids, 
+                        hotel_country_list,
+                        duration_list, 
+                        trip_month, 
+                        dense_features)
+        scores = scores[torch.arange(scores.size(0)),item_ids]
+
+        return scores
+
 class Caser(RecommenderModule):
     '''
     https://github.com/graytowne/caser_pytorch
@@ -488,7 +686,7 @@ class NARMModel(RecommenderModule):
         self.n_month_dim    = 10
         
         n_hotel_country_list_dim   = self.index_mapping_max_value('hotel_country_list')
-
+        self.emb_user    = nn.Embedding(self._n_users, n_factors)
         self.emb         = load_embedding(self._n_items, n_factors, path_item_embedding, 
                                         from_index_mapping, index_mapping, freeze_embedding)
         self.time_emb    = TimeEmbedding(self.n_time_dim, n_factors)
@@ -504,15 +702,16 @@ class NARMModel(RecommenderModule):
         self.v_t = nn.Linear(self.hidden_size * 2, 1, bias=False)
 
         self.activate_func = nn.SELU()
-        n_dense_features  = 0#11
+        n_dense_features  = 0
         output_dense_size = self.hidden_size * 3 + n_dense_features 
 
         # self.mlp_dense = nn.Sequential(
-        #     nn.Linear(n_dense_features, n_dense_features),
+        #     nn.Linear(10, n_dense_features),
         #     self.activate_func,
-        #     nn.Linear(n_dense_features, n_dense_features),
+        #     nn.Linear(n_dense_features, n_factors),
         # )
 
+        self.att = Attention(n_factors)
         # self.mlp_emb_features = nn.Sequential(
         #     nn.Linear(1 * n_factors + self.n_month_dim, n_factors),
         #     self.activate_func,
@@ -525,8 +724,9 @@ class NARMModel(RecommenderModule):
     def index_mapping_max_value(self, key: str) -> int:
         return max(self._index_mapping[key].values())+1
 
-    def forward(self, session_ids, 
+    def forward(self,   session_ids, 
                         item_ids, 
+                        user_features,
                         item_history_ids, 
                         hotel_country_list,
                         duration_list, 
@@ -536,8 +736,13 @@ class NARMModel(RecommenderModule):
         seq    = item_history_ids.permute(1,0)  #TODO
         seq_country = hotel_country_list.permute(1,0)
 
-        hidden  = self.init_hidden(seq.size(1)).to(device)
-        embs    = self.emb_dropout(self.emb(seq))
+        hidden     = self.init_hidden(seq.size(1)).to(device)
+        embs       = self.emb_dropout(self.emb(seq))
+
+        user_emb   = self.emb_dropout(self.emb_user(session_ids))
+        # e_features  = self.mlp_emb_features(torch.cat([emb_first_hotel_country, 
+        #d_features = self.mlp_dense(user_features.float())
+
         #country_embs = self.emb_dropout(self.emb_country(seq_country))
         #emb_first_hotel_country = self.emb_country(first_hotel_country)
 
@@ -549,6 +754,9 @@ class NARMModel(RecommenderModule):
         t_embs  = self.time_emb(duration_list.float().unsqueeze(2)).permute(1,0,2)  # (H, B, E)
         embs    = (embs + t_embs)/2
 
+        # att
+        #_emb, _w    = self.att(embs.permute(1,0,2), m_embs.permute(1,0,2)).permute(1,0,2)
+        #embs        = _emb.permute(1,0,2)
         # Join
         embs    = torch.cat([embs, m_embs], 2)      
         
@@ -573,10 +781,8 @@ class NARMModel(RecommenderModule):
                     .view(mask.size())
         c_local = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
 
-        # e_features  = self.mlp_emb_features(torch.cat([emb_first_hotel_country, 
-        #d_features = self.mlp_dense(dense_features.float())
 
-        c_t     = torch.cat([c_local,c_global], 1)
+        c_t     = torch.cat([c_local, c_global], 1)
         c_t     = self.ct_dropout(c_t)
         
         item_embs = self.emb(torch.arange(self._n_items).to(device).long())
@@ -586,6 +792,7 @@ class NARMModel(RecommenderModule):
 
     def recommendation_score(self, session_ids, 
                                     item_ids, 
+                                    user_features,
                                     item_history_ids, 
                                     hotel_country_list,
                                     duration_list, 
@@ -594,6 +801,7 @@ class NARMModel(RecommenderModule):
         
         scores = self.forward(session_ids, 
                                 item_ids, 
+                                user_features,
                                 item_history_ids, 
                                 hotel_country_list,
                                 duration_list, 
@@ -605,7 +813,6 @@ class NARMModel(RecommenderModule):
 
     def init_hidden(self, batch_size):
         return torch.zeros((self.n_layers * 2, batch_size, self.hidden_size), requires_grad=True)        
-
 
 class NARMTimeSpaceModel(RecommenderModule):
     '''

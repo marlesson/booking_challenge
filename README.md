@@ -5,12 +5,13 @@
 
 ###
 
+```bash
 
-mars-gym run supervised --project config.base_rnn \
-  --recommender-module-class model.GRURecModel \
+mars-gym run supervised --project config.conf1_rnn \
+  --recommender-module-class model.RNNAttModel \
   --recommender-extra-params '{
     "n_factors": 100, 
-    "hidden_size": 100, 
+    "hidden_size": 300, 
     "n_layers": 1, 
     "dropout": 0.2, 
     "from_index_mapping": false,
@@ -20,7 +21,10 @@ mars-gym run supervised --project config.base_rnn \
     "sample_days": 500, 
     "test_days": 30,
     "window_trip": 5,
-    "column_stratification": "user_id"}' \
+    "column_stratification": "user_id",
+    "filter_last_step": true,
+    "balance_sample_step": 200000,
+    "filter_trip_size": 0 }' \
   --test-size 0 \
   --early-stopping-min-delta 0.0001 \
   --learning-rate 0.001 \
@@ -28,15 +32,15 @@ mars-gym run supervised --project config.base_rnn \
   --batch-size 128 \
   --loss-function ce \
   --epochs 100
+```
 
 
-
-mars-gym evaluate supervised --model-task-id SupervisedModelTraining____mars_gym_model_b____cf9405841a
+mars-gym evaluate supervised --model-task-id SupervisedModelTraining____mars_gym_model_b____f3425bd577
 
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____1a02839e77 \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____b01ddaa284 \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_500_30_5.csv"  \
 --local-scheduler
 
@@ -106,7 +110,7 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____13ba51a56b \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____8cd4138036 \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_500_30_5.csv"  \
 --local-scheduler
 
