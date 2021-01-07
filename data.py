@@ -16,7 +16,7 @@ from itertools import chain
 from datetime import datetime, timedelta
 from tqdm import tqdm
 tqdm.pandas()
-
+from sklearn.model_selection import train_test_split
 
 OUTPUT_PATH: str = os.path.join("output")
 BASE_DIR: str = os.path.join(OUTPUT_PATH, "booking")
@@ -152,15 +152,20 @@ class SplitAndPreprocessDataset(luigi.Task):
     print(df.head())
     print(df.shape)
 
-    # Split Data
-    max_timestamp        = df.checkout.max()
-    init_train_timestamp = max_timestamp - timedelta(days = self.sample_days)
-    init_test_timestamp  = max_timestamp - timedelta(days = self.test_days)
+    # # Split Data
+    # max_timestamp        = df.checkout.max()
+    # init_train_timestamp = max_timestamp - timedelta(days = self.sample_days)
+    # init_test_timestamp  = max_timestamp - timedelta(days = self.test_days)
 
-    # TODO Garantir que o usuário fique com a sessão no train ou test
-    df_train = df[(df.checkout >= init_train_timestamp) & (df.checkout < init_test_timestamp)]
-    df_test  = df[df.checkout >= init_test_timestamp]    
-
+    # # TODO Garantir que o usuário fique com a sessão no train ou test
+    # df_train = df[(df.checkout >= init_train_timestamp) & (df.checkout < init_test_timestamp)]
+    # df_test  = df[df.checkout >= init_test_timestamp]    
+    
+    df_trip = df[['utrip_id']].drop_duplicates()
+    df_train, df_test = train_test_split(df_trip, test_size=0.1, random_state=42)
+    df_train, df_test = df[df['utrip_id'].isin(df_train['utrip_id'])], \
+                        df[df['utrip_id'].isin(df_test['utrip_id'])]
+    print(df_train.shape, df_test.shape)
     # Add General Features
     self.add_general_features(df_train)
     self.add_general_features(df_test)
