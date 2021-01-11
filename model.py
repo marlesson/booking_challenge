@@ -612,7 +612,7 @@ class Caser(RecommenderModule):
         self.n_time_dim  = 100
 
         # user and item embeddings
-        #self.user_embeddings = nn.Embedding(num_users, n_factors)
+        self.user_embeddings = nn.Embedding(self._n_users, n_factors)
         self.item_embeddings = load_embedding(self._n_items, n_factors, path_item_embedding, 
                                                 from_index_mapping, index_mapping, freeze_embedding)
         self.emb_drop = nn.Dropout(p=dropout)
@@ -657,7 +657,7 @@ class Caser(RecommenderModule):
         self.dropout = nn.Dropout(self.drop_ratio)
 
         # weight initialization
-        #self.user_embeddings.weight.data.normal_(0, 1.0 / self.user_embeddings.embedding_dim)
+        self.user_embeddings.weight.data.normal_(0, 1.0 / self.user_embeddings.embedding_dim)
         self.item_embeddings.weight.data.normal_(0, 1.0 / self.item_embeddings.embedding_dim)
         #self.W2.weight.data.normal_(0, 1.0 / self.W2.embedding_dim)
         #self.b2.weight.data.zero_()
@@ -693,7 +693,7 @@ class Caser(RecommenderModule):
 
         # Embedding Look-up
         item_embs = self.emb_drop(self.item_embeddings(item_history_ids))  # use unsqueeze() to get 4-D
-        #user_emb = self.user_embeddings(user_var).squeeze(1)
+        user_emb = self.emb_drop(self.user_embeddings(session_ids))#.squeeze(1)
 
         # Add Time
         embs_time   = self.emb_time(duration_list.float().unsqueeze(2))  # (B, H, E)
@@ -732,10 +732,10 @@ class Caser(RecommenderModule):
         # fully-connected layer
         z = self.ac_fc(self.fc1(out))
         
-        y = out_rnn
+        y = torch.cat([z, out_rnn], 1)
 
         item_embs   = self.item_embeddings(torch.arange(self._n_items).to(item_history_ids.device).long()) # (Dim, E)
-        scores      = torch.matmul(torch.cat([z, y], 1), self.b(item_embs).permute(1, 0)) # (B, dim)
+        scores      = torch.matmul(y, self.b(item_embs).permute(1, 0)) # (B, dim)
 
         return scores
 

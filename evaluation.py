@@ -61,19 +61,25 @@ from multiprocessing.pool import Pool
 from scipy import stats
 #from train import MostPopularTraining, CoOccurrenceTraining
 from sklearn.metrics import classification_report
+from train import CoOccurrenceTraining
+import pickle 
+
+SCORE_LIMIT = 200
 
 def acc(r, k =4):
     r = r[:k]
     return np.sum(r)
 
-def _sort_rank_list(score, index_mapping):
+def _sort_rank_list(score, neighbors_idx, index_mapping):
     # UNK, PAD, PAD
     score[0] = score[1] = score[2] = 0
+    item_idx  = np.argsort(score)[::-1][:SCORE_LIMIT]
 
-    item_idx  = np.argsort(score)[::-1][:100]
-    
-    item_id   = [int(index_mapping[item]) for item in item_idx]
-    
+    if neighbors_idx and len(np.unique(neighbors_idx)) > 0:
+        item_id   = [int(index_mapping[item]) for item in item_idx if item in neighbors_idx]
+    else:
+        item_id   = [int(index_mapping[item]) for item in item_idx]
+
     return item_id
 
 def _get_moda(arr):
@@ -211,15 +217,30 @@ class EvaluationTask(BaseEvaluationTask):
         print(df.head())
         print(df.shape)
 
+        
+        index_mapping            = self.model_training.index_mapping['last_city_id']
         reverse_index_mapping    = self.model_training.reverse_index_mapping['last_city_id']
         reverse_index_mapping[1] = 0
         
+        # Map Neighbors
+        neighbors_file = None
+        neighbors_dict = None
+        if self.neighbors_file:
+            print("load neighbors...")
+            with open(self.neighbors_file, "rb") as pkl_handle:
+                neighbors_file = pickle.load(pkl_handle)
+                neighbors_dict = {}
+                for key, values in neighbors_file.items():
+                    neighbors_dict[index_mapping[key]] = [index_mapping[k] for k in values]
+                neighbors_dict[0] = list(reverse_index_mapping.keys())
+                
+
         if self.model_eval == "model":
-            rank_list = self.model_rank_list(generator, reverse_index_mapping)
+            rank_list = self.model_rank_list(generator, reverse_index_mapping, neighbors_dict)
         # elif self.model_eval == "most_popular":
         #     rank_list = self.most_popular_rank_list(generator, reverse_index_mapping)
-        # elif self.model_eval == "coocorrence":
-        #     rank_list = self.coocorrence_rank_list(generator, reverse_index_mapping)
+        elif self.model_eval == "coocorrence":
+            rank_list = self.coocorrence_rank_list(generator, reverse_index_mapping, neighbors_dict)
 
         # Save metrics
         if target in df.columns:
@@ -231,7 +252,7 @@ class EvaluationTask(BaseEvaluationTask):
     def save_metrics(self, df_metric, rank_list):
         #from IPython import embed; embed()
         df_metric['reclist']  = list(rank_list)
-        df_metric['predict']  = df_metric['reclist'].apply(lambda l: l[0])
+        df_metric['predict']  = df_metric['reclist'].apply(lambda l: l[0] if len(l) > 0 else 0)
         df_metric['acc@4']    = df_metric.apply(lambda row: row['last_city_id'] in row.reclist[:4], axis=1).astype(int)
         
         metric = {
@@ -254,15 +275,17 @@ class EvaluationTask(BaseEvaluationTask):
         # Print
         print(json.dumps(metric, indent=4))
 
-    def model_rank_list(self, generator, reverse_index_mapping):
+    def model_rank_list(self, generator, reverse_index_mapping, neighbors_dict):
 
         # Gente Model
         model = self.model_training.get_trained_module()
         model.to(self.torch_device)
         model.eval()
 
-        scores = []
-        rank_list = []
+        scores      = []
+        rank_list   = []
+        idx_item_id = 3
+
         # Inference
         with torch.no_grad():
             for i, (x, _) in tqdm(enumerate(generator), total=len(generator)):
@@ -271,18 +294,68 @@ class EvaluationTask(BaseEvaluationTask):
 
                 scores_tensor: torch.Tensor  = model(*input_params)
                 scores_batch = scores_tensor.detach().cpu().numpy()
-                #scores.extend(scores_batch)
-
+                #neighbors_dict
+                
+                # Neighbors
+                if neighbors_dict:
+                    last_item_idx = x[idx_item_id].numpy()[:,-1]
+                    neighbors_idx = [neighbors_dict[i] for i in last_item_idx]
+                else:
+                    #scores.extend(scores_batch)
+                    neighbors_idx = [None for i in range(len(scores_batch))]
                 # Test
-                _sort_rank_list(scores_batch[0], index_mapping=reverse_index_mapping)
+                _sort_rank_list(scores_batch[0], neighbors_idx=neighbors_idx[0], index_mapping=reverse_index_mapping)
 
                 with Pool(3) as p:
                     _rank_list = list(tqdm(
-                        p.map(functools.partial(_sort_rank_list, index_mapping=reverse_index_mapping), scores_batch),
+                        p.starmap(functools.partial(_sort_rank_list, index_mapping=reverse_index_mapping), zip(scores_batch, neighbors_idx)),
                         total=len(scores_batch),
                     ))
+                    #from IPython import embed; embed()
                     rank_list.extend(_rank_list)
 
                 gc.collect()
+        #from IPython import embed; embed()
+        return rank_list
+
+    def coocorrence_rank_list(self, generator, reverse_index_mapping, neighbors_file):
+        
+
+        cooccurrence = CoOccurrenceTraining(project="config.base_rnn",
+                                          data_frames_preparation_extra_params=self.model_training.data_frames_preparation_extra_params,
+                                          test_size=self.model_training.test_size,
+                                          val_size=self.model_training.val_size,
+                                          test_split_type=self.model_training.test_split_type,
+                                          dataset_split_method=self.model_training.dataset_split_method)  #
+        cooccurrence.fit(self.model_training.train_data_frame)
+
+        scores    = []
+        rank_list = []
+
+        # Inference
+        for i, (x, _) in tqdm(enumerate(generator), total=len(generator)):
+            input_params = x if isinstance(x, list) or isinstance(x, tuple) else [x]
+
+            scores_batch = [] # nxk
+            item_idx = list(range(self.model_training.n_items))
+            for item_history in input_params[2]:
+                last_item_idx = item_history.detach().cpu().numpy()[0]
+
+                score = [cooccurrence.get_score(last_item_idx, i) for i in  item_idx]
+                
+
+                scores_batch.append(score)
+
+            # Test
+            _sort_rank_list(scores_batch[0], index_mapping=reverse_index_mapping)
+
+            with Pool(3) as p:
+                _rank_list = list(tqdm(
+                    p.map(functools.partial(_sort_rank_list, index_mapping=reverse_index_mapping), scores_batch),
+                    total=len(scores_batch),
+                ))
+                rank_list.extend(_rank_list)
+
+            gc.collect()
         
         return rank_list
