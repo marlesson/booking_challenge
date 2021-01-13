@@ -47,7 +47,6 @@ TORCH_LOSS_FUNCTIONS = dict(
 )
 
 
-
 class CoOccurrenceTraining(DummyTraining):
     '''
     Most Popular Model

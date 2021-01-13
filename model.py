@@ -20,6 +20,10 @@ import random
 from typing import Optional, Callable, Tuple
 import math
 
+IDX_FIX = 3
+
+
+
 
 def load_embedding(_n_items, n_factors, path_item_embedding, path_from_index_mapping, index_mapping, freeze_embedding):
 
@@ -315,8 +319,8 @@ class MLTransformerModel(RecommenderModule):
 
     def forward(self, session_ids, 
                         item_ids, 
-                        user_features,
                         item_history_ids, 
+                        user_features,
                         hotel_country_list,
                         duration_list, 
                         trip_month, 
@@ -364,8 +368,8 @@ class MLTransformerModel(RecommenderModule):
 
     def recommendation_score(self, session_ids, 
                         item_ids, 
-                        user_features,
                         item_history_ids, 
+                        user_features,
                         hotel_country_list,
                         duration_list, 
                         trip_month, 
@@ -373,8 +377,8 @@ class MLTransformerModel(RecommenderModule):
         
         scores = self.forward(session_ids, 
                         item_ids, 
-                        user_features,
                         item_history_ids, 
+                        user_features,
                         hotel_country_list,
                         duration_list, 
                         trip_month, 
@@ -451,6 +455,7 @@ class RNNAttModel(RecommenderModule):
         n_factors: int,
         hidden_size: int,
         n_layers: int,
+        window_trip: int,
         path_item_embedding: str,
         from_index_mapping: str,
         dropout: float,
@@ -465,7 +470,7 @@ class RNNAttModel(RecommenderModule):
 
         self.n_time_dim  = 100
         self.n_month_dim = 100
-        self.window_trip = 5
+        self.window_trip = window_trip
         self.emb_dropout = nn.Dropout(self.dropout)
 
         n_hotel_country_list_dim   = self.index_mapping_max_value('hotel_country_list')
@@ -518,13 +523,13 @@ class RNNAttModel(RecommenderModule):
         return max(self._index_mapping[key].values())+1
 
     def forward(self, session_ids, 
-                        item_ids, 
-                        user_features,
-                        item_history_ids, 
-                        hotel_country_list,
-                        duration_list, 
-                        trip_month, 
-                        dense_features):
+                                item_ids, 
+                                item_history_ids, 
+                                user_features,
+                                hotel_country_list,
+                                duration_list, 
+                                trip_month, 
+                                dense_features):
 
         embs         = self.emb_dropout(self.emb_item(item_history_ids))
         embs_country = self.emb_dropout(self.emb_country(hotel_country_list))
@@ -557,22 +562,22 @@ class RNNAttModel(RecommenderModule):
         return scores
 
     def recommendation_score(self, session_ids, 
-                        item_ids, 
-                        user_features,
-                        item_history_ids, 
-                        hotel_country_list,
-                        duration_list, 
-                        trip_month, 
-                        dense_features):
+                                item_ids, 
+                                item_history_ids, 
+                                user_features,
+                                hotel_country_list,
+                                duration_list, 
+                                trip_month, 
+                                dense_features):
         
         scores = self.forward(session_ids, 
-                        item_ids, 
-                        user_features,
-                        item_history_ids, 
-                        hotel_country_list,
-                        duration_list, 
-                        trip_month, 
-                        dense_features)
+                                item_ids, 
+                                item_history_ids, 
+                                user_features,
+                                hotel_country_list,
+                                duration_list, 
+                                trip_month, 
+                                dense_features)
         scores = scores[torch.arange(scores.size(0)),item_ids]
 
         return scores
@@ -670,8 +675,8 @@ class Caser(RecommenderModule):
 
     def forward(self, session_ids, 
                         item_ids, 
-                        user_features,
                         item_history_ids, 
+                        user_features,
                         hotel_country_list,
                         duration_list, 
                         trip_month, 
@@ -741,8 +746,8 @@ class Caser(RecommenderModule):
 
     def recommendation_score(self, session_ids, 
                         item_ids, 
-                        user_features,
                         item_history_ids, 
+                        user_features,
                         hotel_country_list,
                         duration_list, 
                         trip_month, 
@@ -750,8 +755,8 @@ class Caser(RecommenderModule):
         
         scores = self.forward(session_ids, 
                         item_ids, 
-                        user_features,
                         item_history_ids, 
+                        user_features,
                         hotel_country_list,
                         duration_list, 
                         trip_month, 
@@ -810,7 +815,7 @@ class NARMModel(RecommenderModule):
         #     nn.Linear(n_dense_features, n_factors),
         # )
 
-        self.att = Attention(n_factors)
+        self.att = Attention(n_factors + self.n_month_dim)
         # self.mlp_emb_features = nn.Sequential(
         #     nn.Linear(1 * n_factors + self.n_month_dim, n_factors),
         #     self.activate_func,
@@ -822,11 +827,14 @@ class NARMModel(RecommenderModule):
         
     def index_mapping_max_value(self, key: str) -> int:
         return max(self._index_mapping[key].values())+1
+        
+    def flatten(self, input):
+        return input.view(input.size(0), -1)
 
     def forward(self,   session_ids, 
                         item_ids, 
-                        user_features,
                         item_history_ids, 
+                        user_features,
                         hotel_country_list,
                         duration_list, 
                         trip_month, 
@@ -849,6 +857,8 @@ class NARMModel(RecommenderModule):
         m_emb   = self.emb_dropout(self.month_emb(trip_month.long()))
         m_embs  = m_emb.unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
+        #m_embs2 = dense_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
+
         # Add Time
         t_embs  = self.time_emb(duration_list.float().unsqueeze(2)).permute(1,0,2)  # (H, B, E)
         embs    = (embs + t_embs)/2
@@ -857,8 +867,10 @@ class NARMModel(RecommenderModule):
         #_emb, _w    = self.att(embs.permute(1,0,2), m_embs.permute(1,0,2)).permute(1,0,2)
         #embs        = _emb.permute(1,0,2)
         # Join
-        embs    = torch.cat([embs, m_embs], 2)      
-        
+        embs        = torch.cat([embs, m_embs], 2)      
+        _emb, _w    = self.att(embs.permute(1,0,2), embs.permute(1,0,2))
+        embs        = _emb.permute(1,0,2)
+                
         gru_out, hidden = self.gru(embs, hidden)
 
         # fetch the last hidden state of last timestamp
@@ -869,7 +881,7 @@ class NARMModel(RecommenderModule):
         q1 = self.a_1(gru_out.contiguous().view(-1, self.hidden_size * 2)).view(gru_out.size())  
         q2 = self.a_2(ht)
 
-        mask      = torch.where(seq.permute(1, 0) > 0, torch.tensor([1.], device = device), 
+        mask      = torch.where(seq.permute(1, 0) > IDX_FIX, torch.tensor([1.], device = device), 
                         torch.tensor([0.], device = device))
 
         q2_expand = q2.unsqueeze(1).expand_as(q1)
@@ -881,7 +893,7 @@ class NARMModel(RecommenderModule):
         c_local = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
 
 
-        c_t     = torch.cat([c_local, c_global], 1)
+        c_t     = torch.cat([c_local, c_global], 1) #, dense_features.float()
         c_t     = self.ct_dropout(c_t)
         
         item_embs = self.emb(torch.arange(self._n_items).to(device).long())
@@ -891,8 +903,8 @@ class NARMModel(RecommenderModule):
 
     def recommendation_score(self, session_ids, 
                                     item_ids, 
-                                    user_features,
                                     item_history_ids, 
+                                    user_features,
                                     hotel_country_list,
                                     duration_list, 
                                     trip_month, 
@@ -900,8 +912,8 @@ class NARMModel(RecommenderModule):
         
         scores = self.forward(session_ids, 
                                 item_ids, 
-                                user_features,
                                 item_history_ids, 
+                                user_features,
                                 hotel_country_list,
                                 duration_list, 
                                 trip_month, 

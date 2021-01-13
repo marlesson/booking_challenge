@@ -174,9 +174,9 @@ class SplitAndPreprocessDataset(luigi.Task):
     df_train = self.filter_train_data(df_train)
     
     # add country_count
-    df_country_count = df_train.groupby(['hotel_country']).agg(country_count=('user_id','count')).reset_index()
+    df_country_count = df_train.groupby(['city_id']).agg(country_count=('user_id','count')).reset_index()
     print(df_country_count.head())
-    df_train = df_train.merge(df_country_count, on='hotel_country', how='left')
+    df_train = df_train.merge(df_country_count, on='city_id', how='left')
     df_test['country_count'] = 1
 
     print(df_train.head())
@@ -188,7 +188,7 @@ class SplitAndPreprocessDataset(luigi.Task):
 
     # Add Steps Interaction in Train Set
     df_trip_train = pd.concat([df_trip_train, 
-                              self.add_steps_interaction(df_train, df_train.step.max()-1)])
+                             self.add_steps_interaction(df_train, df_train.step.max()-1)])
     
     print(df_trip_train.head())
     print(df_trip_train.shape)

@@ -72,14 +72,16 @@ def acc(r, k =4):
 
 def _sort_rank_list(score, neighbors_idx, index_mapping):
     # UNK, PAD, PAD
-    score[0] = score[1] = score[2] = 0
+    score[0]  = score[1] = score[2] = score[3] = 0
     item_idx  = np.argsort(score)[::-1][:SCORE_LIMIT]
-
+    
     if neighbors_idx and len(np.unique(neighbors_idx)) > 0:
+        neighbors_idx = np.unique(neighbors_idx)
+        #from IPython import embed; embed()
         item_id   = [int(index_mapping[item]) for item in item_idx if item in neighbors_idx]
     else:
         item_id   = [int(index_mapping[item]) for item in item_idx]
-
+    #
     return item_id
 
 def _get_moda(arr):
@@ -221,7 +223,7 @@ class EvaluationTask(BaseEvaluationTask):
         index_mapping            = self.model_training.index_mapping['last_city_id']
         reverse_index_mapping    = self.model_training.reverse_index_mapping['last_city_id']
         reverse_index_mapping[1] = 0
-        
+        #from IPython import embed; embed()
         # Map Neighbors
         neighbors_file = None
         neighbors_dict = None
@@ -232,7 +234,10 @@ class EvaluationTask(BaseEvaluationTask):
                 neighbors_dict = {}
                 for key, values in neighbors_file.items():
                     neighbors_dict[index_mapping[key]] = [index_mapping[k] for k in values]
-                neighbors_dict[0] = list(reverse_index_mapping.keys())
+                neighbors_dict[0] = []
+                neighbors_dict[1] = []
+                neighbors_dict[2] = []
+                neighbors_dict[3] = []
                 
 
         if self.model_eval == "model":
@@ -253,6 +258,7 @@ class EvaluationTask(BaseEvaluationTask):
         #from IPython import embed; embed()
         df_metric['reclist']  = list(rank_list)
         df_metric['predict']  = df_metric['reclist'].apply(lambda l: l[0] if len(l) > 0 else 0)
+        #from IPython import embed; embed()
         df_metric['acc@4']    = df_metric.apply(lambda row: row['last_city_id'] in row.reclist[:4], axis=1).astype(int)
         
         metric = {
@@ -284,7 +290,12 @@ class EvaluationTask(BaseEvaluationTask):
 
         scores      = []
         rank_list   = []
-        idx_item_id = 3
+        idx_item_id = 2
+
+        def get_neighbors(n, neighbors_dict):
+            neighbors = [neighbors_dict[i] for i in n]
+            neighbors = list(np.unique(sum(neighbors, [])))
+            return neighbors
 
         # Inference
         with torch.no_grad():
@@ -296,24 +307,28 @@ class EvaluationTask(BaseEvaluationTask):
                 scores_batch = scores_tensor.detach().cpu().numpy()
                 #neighbors_dict
                 
+                
                 # Neighbors
                 if neighbors_dict:
                     last_item_idx = x[idx_item_id].numpy()[:,-1]
-                    neighbors_idx = [neighbors_dict[i] for i in last_item_idx]
+                    #neighbors_idx = [neighbors_dict[i] for i in last_item_idx]
+                    neighbors_idx = [get_neighbors(n, neighbors_dict) for n in x[idx_item_id].numpy()]
+                    #from IPython import embed; embed()
                 else:
                     #scores.extend(scores_batch)
                     neighbors_idx = [None for i in range(len(scores_batch))]
                 # Test
                 _sort_rank_list(scores_batch[0], neighbors_idx=neighbors_idx[0], index_mapping=reverse_index_mapping)
-
+                
+                #from IPython import embed; embed()
                 with Pool(3) as p:
                     _rank_list = list(tqdm(
                         p.starmap(functools.partial(_sort_rank_list, index_mapping=reverse_index_mapping), zip(scores_batch, neighbors_idx)),
                         total=len(scores_batch),
                     ))
-                    #from IPython import embed; embed()
+                    
                     rank_list.extend(_rank_list)
-
+                #from IPython import embed; embed()
                 gc.collect()
         #from IPython import embed; embed()
         return rank_list
