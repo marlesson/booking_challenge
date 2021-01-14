@@ -115,29 +115,18 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____ad7cf2835e \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____f479149146 \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_500_30_5.csv"  \
 --local-scheduler
 
 {
-    "task_name": "SupervisedModelTraining____mars_gym_model_b____2d2e241d4b_8b6b581e5d",
+    "task_name": "SupervisedModelTraining____mars_gym_model_b____f479149146_236981e7b6",
     "count": 11860,
-    "acc@4": 0.5233558178752108
+    "acc@4": 0.5230185497470489
 }
 
 
 
-PYTHONPATH="." luigi --module evaluation EvaluationTask \
---model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____ad7cf2835e \
---file "/media/workspace/booking_challenge/output/booking/dataset/test_500_30_10.csv"  \
---local-scheduler
-
-{
-    "task_name": "SupervisedModelTraining____mars_gym_model_b____ad7cf2835e_b3d288b0be",
-    "count": 11860,
-    "acc@4": 0.5182967959527824
-}
 
 
 # Caser
