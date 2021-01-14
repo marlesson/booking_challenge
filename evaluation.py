@@ -124,12 +124,8 @@ class EvaluationTask(BaseEvaluationTask):
     normalize_file_path: str = luigi.Parameter(default=None)
     file: str = luigi.Parameter(default="")
     neighbors_file: str = luigi.Parameter(default=None)
-
     model_eval: str = luigi.ChoiceParameter(choices=["model", "most_popular", "coocorrence"], default="model")
-
-    sample_size: int = luigi.Parameter(default=1000)
-    percent_limit: float = luigi.FloatParameter(default=0.2)
-    submission_size: int =  luigi.IntParameter(default=10)
+    submission_size: int =  luigi.IntParameter(default=4)
 
     @property
     def task_name(self):
@@ -250,9 +246,25 @@ class EvaluationTask(BaseEvaluationTask):
         # Save metrics
         if target in df.columns:
             self.save_metrics(df_metric, rank_list)
-        
+
+        self.save_submission(df_metric, rank_list)
+
+    def save_submission(self, df_metric, rank_list):
+
+        df_metric['reclist']  = list(rank_list)
+        df_metric['city_id_1'] = df_metric['reclist'].apply(lambda reclist: reclist[0])
+        df_metric['city_id_2'] = df_metric['reclist'].apply(lambda reclist: reclist[1])
+        df_metric['city_id_3'] = df_metric['reclist'].apply(lambda reclist: reclist[2])
+        df_metric['city_id_4'] = df_metric['reclist'].apply(lambda reclist: reclist[3])
+
+        # base submission
+        df_metric[['utrip_id', 'city_id_1', 'city_id_2', 'city_id_3', 'city_id_4']]\
+            .to_csv(self.output().path+'/submission_{}.csv'.format(self.task_name), index=False)
+
         # Save submission
-        np.savetxt(self.output().path+'/submission_{}.csv'.format(self.task_name), rank_list, fmt='%i', delimiter=',') 
+        #np.savetxt(self.output().path+'/submission_{}.csv'.format(self.task_name), rank_list, fmt='%i', delimiter=',') 
+        df_metric[['utrip_id', 'reclist']]\
+            .to_csv(self.output().path+'/all_reclist_{}.csv'.format(self.task_name), index=False)
 
     def save_metrics(self, df_metric, rank_list):
         #from IPython import embed; embed()

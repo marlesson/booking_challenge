@@ -23,6 +23,7 @@ BASE_DIR: str = os.path.join(OUTPUT_PATH, "booking")
 DATASET_DIR: str = os.path.join(OUTPUT_PATH, "booking", "dataset")
 
 BASE_DATASET_FILE : str = os.path.join("data", "Booking", "booking_train_set.csv")
+BASE_DATASET_TEST_FILE : str = os.path.join("data", "Booking", "booking_test_set.csv")
 
 LIMIT_DURATION_SUM = 22
 LIMIT_TRIP_SIZE    = 10
@@ -33,7 +34,7 @@ def count_hotel(hotel_country):
 def list_without_last(itens):
     return list(itens[:-1])
 
-def list_without_last_and_pad(pad=5, dtype=int):
+def list_and_pad(pad=5, dtype=int, ignore_last_value=True):
     def add_pad(items): 
         arr = list_without_last(items)
         arr = list(([dtype(0)] * (pad - len(arr[-pad:])) + arr[-pad:])) 
@@ -43,17 +44,14 @@ def list_without_last_and_pad(pad=5, dtype=int):
     return add_pad
     
 class SplitAndPreprocessDataset(luigi.Task):
-  sample_days: int = luigi.IntParameter(default=500)
-  test_days: int = luigi.IntParameter(default=7)
+  test_split: float = luigi.IntParameter(default=0.1)
   window_trip: int = luigi.IntParameter(default=5)
 
   # def requires(self):
 
   def output(self):
-    return luigi.LocalTarget(os.path.join(DATASET_DIR, "train_{}_{}_{}.csv"\
-                .format(self.sample_days, self.test_days, self.window_trip),)),\
-            luigi.LocalTarget(os.path.join(DATASET_DIR, "test_{}_{}_{}.csv"\
-                .format(self.sample_days, self.test_days, self.window_trip),))                    
+    return luigi.LocalTarget(os.path.join(DATASET_DIR, "train_{}_{}.csv".format(self.test_split, self.window_trip))),\
+            luigi.LocalTarget(os.path.join(DATASET_DIR, "test_{}_{}.csv".format(self.test_split, self.window_trip)))                    
 
   def add_general_features(self, df):
 
@@ -76,16 +74,27 @@ class SplitAndPreprocessDataset(luigi.Task):
         trip_size=('checkin', len),
         start_trip=('checkin', 'first'),
         end_trip=('checkin', 'last'),
-        checkin_list=('checkin_str', list_without_last_and_pad(self.window_trip, str)),
-        checkout_list=('checkout_str', list_without_last_and_pad(self.window_trip, str)),
-        days_since_2016_list=('days_since_2016', list_without_last_and_pad(self.window_trip, int)),
-        duration_list=('duration', list_without_last_and_pad(self.window_trip, int)),
-        city_id_list=('city_id', list_without_last_and_pad(self.window_trip, str)),
-        device_class_list=('device_class', list_without_last_and_pad(self.window_trip, str)),
-        affiliate_id_list=('affiliate_id', list_without_last_and_pad(self.window_trip, str)),
-        booker_country_list=('booker_country', list_without_last_and_pad(self.window_trip, str)),
-        hotel_country_list=('hotel_country', list_without_last_and_pad(self.window_trip, str)),
-        step_list=('step', list_without_last_and_pad(self.window_trip, int)),
+        
+        checkin_list=('checkin_str', list_and_pad(self.window_trip, str)),
+        checkout_list=('checkout_str', list_and_pad(self.window_trip, str)),
+        days_since_2016_list=('days_since_2016', list_and_pad(self.window_trip, int)),
+        duration_list=('duration', list_and_pad(self.window_trip, int)),
+        city_id_list=('city_id', list_and_pad(self.window_trip, str)),
+        device_class_list=('device_class', list_and_pad(self.window_trip, str)),
+        affiliate_id_list=('affiliate_id', list_and_pad(self.window_trip, str)),
+        booker_country_list=('booker_country', list_and_pad(self.window_trip, str)),
+        hotel_country_list=('hotel_country', list_and_pad(self.window_trip, str)),
+        step_list=('step', list_and_pad(self.window_trip, int)),
+
+        last_checkin=('checkin_str', 'last'),
+        last_checkout=('checkout_str', 'last'),
+        last_days_since_2016=('days_since_2016', 'last'),
+        last_duration=('duration', 'last'),
+        last_device_class=('device_class', 'last'),
+        last_affiliate_id=('affiliate_id', 'last'),
+        last_booker_country=('booker_country', 'last'),
+        last_step=('step', 'last'),
+
         first_city_id=('city_id', 'first'),
         first_hotel_country=('hotel_country', 'first'),
         last_city_id=('city_id', 'last'),
@@ -140,14 +149,13 @@ class SplitAndPreprocessDataset(luigi.Task):
   def run(self):
     os.makedirs(DATASET_DIR, exist_ok=True)
 
-    df = pd.read_csv(BASE_DATASET_FILE, 
+    df      = pd.read_csv(BASE_DATASET_FILE, 
                     dtype={"user_id": str, "city_id": str, 'affiliate_id': str,'utrip_id': str}, 
-                    parse_dates=['checkin', 'checkout'])
+                    parse_dates=['checkin', 'checkout']).sort_values('checkin')
     
     df_user = pd.read_csv(os.path.join(DATASET_DIR, "all_user_features.csv"), 
                     dtype={"user_id": str}, usecols=["user_id", 'user_features'])
-    
-    df = df.merge(df_user, on='user_id')
+    df      = df.merge(df_user, on='user_id')
 
     print(df.head())
     print(df.shape)
@@ -161,16 +169,29 @@ class SplitAndPreprocessDataset(luigi.Task):
     # df_train = df[(df.checkout >= init_train_timestamp) & (df.checkout < init_test_timestamp)]
     # df_test  = df[df.checkout >= init_test_timestamp]    
     
-    df_trip = df[['utrip_id']].drop_duplicates()
-    df_train, df_test = train_test_split(df_trip, test_size=0.1, random_state=42)
-    df_train, df_test = df[df['utrip_id'].isin(df_train['utrip_id'])], \
-                        df[df['utrip_id'].isin(df_test['utrip_id'])]
+    if self.test_split > 0:
+
+        df_trip = df[['utrip_id']].drop_duplicates()
+        df_train, df_test = train_test_split(df_trip, test_size=self.test_split, random_state=42)
+        df_train, df_test = df[df['utrip_id'].isin(df_train['utrip_id'])].sort_values('checkin'), \
+                            df[df['utrip_id'].isin(df_test['utrip_id'])].sort_values('checkin')
+    else:
+        df_train = df
+        df_test  = pd.read_csv(BASE_DATASET_TEST_FILE, 
+                        dtype={"user_id": str, "city_id": str, 'affiliate_id': str,'utrip_id': str}, 
+                        parse_dates=['checkin', 'checkout']).sort_values('checkin')
+        
+        
+        
+        df_test  = df_test.merge(df_user, on='user_id', how='left')
+
     print(df_train.shape, df_test.shape)
     # Add General Features
     self.add_general_features(df_train)
     self.add_general_features(df_test)
 
-    # Filter 
+    # Add/Filter  Train Informaion
+    # --------------------------------------------------------
     df_train = self.filter_train_data(df_train)
     
     # add country_count
@@ -181,6 +202,7 @@ class SplitAndPreprocessDataset(luigi.Task):
 
     print(df_train.head())
     print(df_train.shape)
+    # --------------------------------------------------------
 
     # Group Trip
     df_trip_train = self.group_by_trip(df_train)
@@ -203,8 +225,7 @@ class SplitAndPreprocessDataset(luigi.Task):
     df_trip_test.to_csv(self.output()[1].path, index=False)
 
 class SessionInteractionDataFrame(BasePrepareDataFrames):
-    sample_days: int = luigi.IntParameter(default=500)
-    test_days: int = luigi.IntParameter(default=7)
+    test_split: float = luigi.IntParameter(default=0.1)
     window_trip: int = luigi.IntParameter(default=5)
     filter_last_step: bool = luigi.BoolParameter(default=False)
     balance_sample_step: int = luigi.IntParameter(default=0)
@@ -214,8 +235,7 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     item_column: str = luigi.Parameter(default="last_city_id")
 
     def requires(self):
-        return SplitAndPreprocessDataset(sample_days=self.sample_days, 
-                                          test_days=self.test_days, 
+        return SplitAndPreprocessDataset(test_split=self.test_split, 
                                           window_trip=self.window_trip)
 
     @property
@@ -258,7 +278,6 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
             if len(df) > 0 and isinstance(df.iloc[0][c],str):
                 df[c] = df[c].apply(eval)
 
-
         # add features
         df['start_trip'] = pd.to_datetime(df['start_trip'])
         df['start_trip_quarter']    = df['start_trip'].dt.quarter
@@ -299,6 +318,10 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
         if data_key == 'TEST_GENERATOR': 
             df = df_last_step
 
+
+            #TODO
+            df['user_features'] = [[] for i in range(len(df))]            
+
         elif self.filter_last_step:
             if self.balance_sample_step > 0:
                 _val_size = 1.0/self.n_splits if self.dataset_split_method == "k_fold" else self.val_size
@@ -309,9 +332,12 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
                     _sample_view_size = int(self.balance_sample_step * (1-_val_size))
                 
                 df_steps = df[~df.index.isin(df_last_step['index'])] # Filter only step midde
-                df_steps = self.sample_balance_df(df_steps, _sample_view_size) # view
 
-                df = pd.concat([df_last_step, df_steps]).drop_duplicates(subset = ['utrip_id', 'trip_size'], keep = 'first')
+                if len(df_steps) > 0:
+                    df_steps = self.sample_balance_df(df_steps, _sample_view_size) # view
+                    df = pd.concat([df_last_step, df_steps]).drop_duplicates(subset = ['utrip_id', 'trip_size'], keep = 'first')
+                else:
+                    df = df_last_step
             else:
                 df = df_last_step
 
