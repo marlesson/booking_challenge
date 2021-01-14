@@ -473,8 +473,8 @@ class RNNAttModel(RecommenderModule):
         self.window_trip = window_trip
         self.emb_dropout = nn.Dropout(self.dropout)
 
-        n_hotel_country_list_dim   = self.index_mapping_max_value('hotel_country_list')
-        self.emb_country = nn.Embedding(n_hotel_country_list_dim, n_factors)
+        n_booker_country_list_dim   = self.index_mapping_max_value('booker_country_list')
+        self.emb_country = nn.Embedding(n_booker_country_list_dim, n_factors)
         self.emb_time    = TimeEmbedding(self.n_time_dim, n_factors)
         self.emb_month   = nn.Embedding(13, self.n_month_dim)
         self.emb_user    = nn.Embedding(self._n_users, n_factors)
@@ -523,19 +523,21 @@ class RNNAttModel(RecommenderModule):
         return max(self._index_mapping[key].values())+1
 
     def forward(self, session_ids, 
-                                item_ids, 
-                                item_history_ids, 
-                                user_features,
-                                hotel_country_list,
-                                duration_list, 
-                                trip_month, 
-                                dense_features):
+                        item_ids, 
+                        item_history_ids, 
+                        affiliate_id_list,
+                        device_list,
+                        user_features,
+                        booker_country_list,
+                        duration_list, 
+                        start_trip_month, 
+                        dense_features):
 
         embs         = self.emb_dropout(self.emb_item(item_history_ids))
-        embs_country = self.emb_dropout(self.emb_country(hotel_country_list))
+        embs_country = self.emb_dropout(self.emb_country(booker_country_list))
 
         # # Add Month
-        embs_month = self.emb_month(trip_month.long())
+        embs_month = self.emb_month(start_trip_month.long())
         embs_month = embs_month.unsqueeze(1).expand(item_history_ids.shape[0], item_history_ids.shape[1], self.n_month_dim)
         #embs    = torch.cat([embs, embs_month], 2)      
 
@@ -562,22 +564,26 @@ class RNNAttModel(RecommenderModule):
         return scores
 
     def recommendation_score(self, session_ids, 
-                                item_ids, 
-                                item_history_ids, 
-                                user_features,
-                                hotel_country_list,
-                                duration_list, 
-                                trip_month, 
-                                dense_features):
+                        item_ids, 
+                        item_history_ids, 
+                        affiliate_id_list,
+                        device_list,
+                        user_features,
+                        booker_country_list,
+                        duration_list, 
+                        start_trip_month, 
+                        dense_features):
         
         scores = self.forward(session_ids, 
-                                item_ids, 
-                                item_history_ids, 
-                                user_features,
-                                hotel_country_list,
-                                duration_list, 
-                                trip_month, 
-                                dense_features)
+                        item_ids, 
+                        item_history_ids, 
+                        affiliate_id_list,
+                        device_list,
+                        user_features,
+                        booker_country_list,
+                        duration_list, 
+                        start_trip_month, 
+                        dense_features)
         scores = scores[torch.arange(scores.size(0)),item_ids]
 
         return scores
@@ -615,6 +621,11 @@ class Caser(RecommenderModule):
         self.ac_fc = F.relu#activation_getter[p_ac_fc]
         num_items = self._n_items
         self.n_time_dim  = 100
+        self.n_month_dim = 10
+
+        n_booker_country_list_dim   = self.index_mapping_max_value('booker_country_list')
+        n_affiliate_id_list_dim    = self.index_mapping_max_value('affiliate_id_list')
+        n_device_list_dim         = self.index_mapping_max_value('device_class_list')
 
         # user and item embeddings
         self.user_embeddings = nn.Embedding(self._n_users, n_factors)
@@ -623,28 +634,34 @@ class Caser(RecommenderModule):
         self.emb_drop = nn.Dropout(p=dropout)
 
         self.emb_time    = TimeEmbedding(self.n_time_dim, n_factors)
-        self.att_1       = Attention(n_factors)
+        self.month_emb   = nn.Embedding(13, self.n_month_dim)
+        self.emb_country = nn.Embedding(n_booker_country_list_dim, n_factors)
+        self.emb_affiliate = nn.Embedding(n_affiliate_id_list_dim, n_factors)
+        self.emb_device  = nn.Embedding(n_device_list_dim, 10)        
+
+        self.input_rnn_dim = n_factors * 3 + self.n_month_dim 
+        self.att           = Attention(self.input_rnn_dim)
 
         # vertical conv layer
         self.conv_v = nn.Conv2d(1, self.n_v, (L, 1))
         
         # horizontal conv layer
         lengths = [i + 1 for i in range(L)]
-        self.conv_h = nn.ModuleList([nn.Conv2d(1, self.n_h, (i, n_factors)) for i in lengths])
+        self.conv_h = nn.ModuleList([nn.Conv2d(1, self.n_h, (i, self.input_rnn_dim)) for i in lengths])
 
         # fully-connected layer
-        self.fc1_dim_v = self.n_v * n_factors
+        self.fc1_dim_v = self.n_v * self.input_rnn_dim
         self.fc1_dim_h = self.n_h * len(lengths)
 
         self.hidden_size = 300 
-        self.n_layers = 1
-        self.gru1 = nn.GRU(n_factors, self.hidden_size, self.n_layers, 
+        self.n_layers    = 1
+        self.gru1 = nn.GRU(self.input_rnn_dim, self.hidden_size, self.n_layers, 
                             dropout=dropout, bidirectional=True)
         
         fc1_dim_in     = self.fc1_dim_v + self.fc1_dim_h 
 
         # W1, b1 can be encoded with nn.Linear
-        #self.fc1 = nn.Linear(fc1_dim_in, n_factors)
+        #self.fc1 = nn.Linear(fc1_dim_in, self.input_rnn_dim)
 
 
         self.activate_func = nn.ReLU()
@@ -671,15 +688,19 @@ class Caser(RecommenderModule):
         self.out = nn.Linear(n_factors, self._n_items)
 
         #self.cache_x = None
-
+    def index_mapping_max_value(self, key: str) -> int:
+        return max(self._index_mapping[key].values())+1
+        
 
     def forward(self, session_ids, 
                         item_ids, 
                         item_history_ids, 
+                        affiliate_id_list,
+                        device_list,
                         user_features,
-                        hotel_country_list,
+                        booker_country_list,
                         duration_list, 
-                        trip_month, 
+                        start_trip_month, 
                         dense_features): # for training        
         """
         The forward propagation used to get recommendation scores, given
@@ -700,11 +721,20 @@ class Caser(RecommenderModule):
         item_embs = self.emb_drop(self.item_embeddings(item_history_ids))  # use unsqueeze() to get 4-D
         user_emb = self.emb_drop(self.user_embeddings(session_ids))#.squeeze(1)
 
-        # Add Time
-        embs_time   = self.emb_time(duration_list.float().unsqueeze(2))  # (B, H, E)
-        item_embs   = (item_embs + embs_time)/2
+        affiliate_emb = self.emb_drop(self.emb_affiliate(affiliate_id_list))
+        #device_emb = self.emb_drop(self.emb_device(seq_device))
+        country_embs = self.emb_drop(self.emb_country(booker_country_list))
 
-        #item_embs, att_w = self.att_1(item_embs, item_embs)
+        # Time/Month Embs
+        m_emb   = self.emb_drop(self.month_emb(start_trip_month.long()))
+        m_embs  = m_emb.unsqueeze(1).expand(item_history_ids.shape[0], item_history_ids.shape[1], self.n_month_dim)
+
+        # Add Time
+        t_embs  = self.emb_time(duration_list.float().unsqueeze(2)) # (B, H, E)
+        item_embs    = (item_embs + t_embs)/2
+
+        item_embs    = torch.cat([item_embs, affiliate_emb, country_embs, m_embs], 2)
+        item_embs, _w    = self.att(item_embs, item_embs)
 
         item_embs2 = item_embs.unsqueeze(1)
 
@@ -724,8 +754,7 @@ class Caser(RecommenderModule):
                 out_hs.append(pool_out)
             out_h = torch.cat(out_hs, 1)  # prepare for fully connect
 
-        embs, att_w = self.att_1(item_embs, item_embs)
-        output, hidden = self.gru1(embs)
+        output, hidden = self.gru1(item_embs)
         out_rnn        = output[:,-1] 
 
         # Fully-connected Layers
@@ -747,10 +776,12 @@ class Caser(RecommenderModule):
     def recommendation_score(self, session_ids, 
                         item_ids, 
                         item_history_ids, 
+                        affiliate_id_list,
+                        device_list,
                         user_features,
-                        hotel_country_list,
+                        booker_country_list,
                         duration_list, 
-                        trip_month, 
+                        start_trip_month, 
                         dense_features):
         
         scores = self.forward(session_ids, 

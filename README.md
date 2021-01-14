@@ -51,14 +51,14 @@ mars-gym run supervised --project config.conf1_rnn \
     "path_item_embedding": false, 
     "freeze_embedding": false}' \
   --data-frames-preparation-extra-params '{
-    "sample_days": 500, 
-    "test_days": 30,
+    "test_split": 0.1, 
     "window_trip": 5,
     "column_stratification": "user_id",
     "filter_last_step": true,
-    "balance_sample_step": 500000,
+    "balance_sample_step": 200000,
     "filter_trip_size": 0 }' \
   --test-size 0 \
+  --val-size 0.1 \
   --early-stopping-min-delta 0.0001 \
   --learning-rate 0.001 \
   --metrics='["loss"]' \
@@ -67,18 +67,12 @@ mars-gym run supervised --project config.conf1_rnn \
   --epochs 100
 ```
 
-
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____4bd8cd44d1 \
---file "/media/workspace/booking_challenge/output/booking/dataset/test_500_30_5.csv"  \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____4634d6e695 \
+--file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_5.csv"  \
 --local-scheduler
 
-{
-    "task_name": "SupervisedModelTraining____mars_gym_model_b____4bd8cd44d1_2b74728525",
-    "count": 11860,
-    "acc@4": 0.4992411467116358
-}
 
 
 # NARMModel
@@ -103,7 +97,7 @@ mars-gym run supervised --project config.conf1_rnn \
     "balance_sample_step": 200000,
     "filter_trip_size": 0 }' \
   --test-size 0 \
-  --val-size 0.2 \
+  --val-size 0.1 \
   --early-stopping-min-delta 0.0001 \
   --learning-rate 0.001 \
   --metrics='["loss", "top_k_acc"]' \
@@ -115,19 +109,15 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____e186761908 \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____4634d6e695 \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_5.csv"  \
 --local-scheduler
 
 {
-    "task_name": "SupervisedModelTraining____mars_gym_model_b____e186761908_6937860c52",
-    "count": 11794,
-    "acc@4": 0.515855519755808
+    "task_name": "SupervisedModelTraining____mars_gym_model_b____4634d6e695_97c2fa14b9",
+    "count": 21674,
+    "acc@4": 0.5088585401863984
 }
-
-
-
-
 
 
 # Caser
@@ -146,33 +136,33 @@ mars-gym run supervised --project config.conf1_rnn \
       "path_item_embedding": false, 
       "freeze_embedding": false}' \
   --data-frames-preparation-extra-params '{
-    "sample_days": 500, 
-    "test_days": 30,
+    "test_split": 0.1, 
     "window_trip": 5,
     "column_stratification": "user_id",
     "filter_last_step": true,
-    "balance_sample_step": 500000,
+    "balance_sample_step": 200000,
     "filter_trip_size": 0 }' \
   --test-size 0 \
+  --val-size 0.1 \
   --early-stopping-min-delta 0.0001 \
   --learning-rate 0.001 \
-  --metrics='["loss"]' \
+  --metrics='["loss", "top_k_acc"]' \
   --loss-function ce \
+  --loss-function-class loss.FocalLoss \
   --batch-size 128 \
   --epochs 100
 ```
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____f841e27287 \
---file "/media/workspace/booking_challenge/output/booking/dataset/test_500_30_5_.csv"  \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____8a7a31fed3 \
+--file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_5.csv"  \
 --local-scheduler
 
 {
-    "task_name": "SupervisedModelTraining____mars_gym_model_b____f841e27287_2882c0a0a4",
-    "count": 11860,
-    "acc@4": 0.5112984822934232
+    "task_name": "SupervisedModelTraining____mars_gym_model_b____8a7a31fed3_7e1e200892",
+    "count": 21674,
+    "acc@4": 0.4644735627941312
 }
-
 
 
 # MLTransformerModel2

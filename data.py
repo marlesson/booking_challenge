@@ -216,9 +216,9 @@ class SplitAndPreprocessDataset(luigi.Task):
     print(df_trip_train.shape)
 
     # Filter after
-    # yes, the trips in test set contain at least 4 reservations
+    # yes, the trips in test set contain at least 3 reservations
     df_trip_train = df_trip_train[df_trip_train['trip_size'] > 0]
-    df_trip_test  = df_trip_test[df_trip_test['trip_size'] >= 4]
+    df_trip_test  = df_trip_test[df_trip_test['trip_size'] >= 3]
 
     # Save
     df_trip_train.to_csv(self.output()[0].path, index=False)
