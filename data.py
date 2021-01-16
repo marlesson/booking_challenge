@@ -32,11 +32,16 @@ def count_hotel(hotel_country):
     return len(list(np.unique(hotel_country)))
 
 def list_without_last(itens):
-    return list(itens[:-1])
+    l = list(itens[:-1])
+    l.append("M") #mask
+    return l
 
 def list_and_pad(pad=5, dtype=int, ignore_last_value=True):
     def add_pad(items): 
-        arr = list_without_last(items)
+        if ignore_last_value:
+            arr = list_without_last(items)
+        else:
+            arr = list(items)
         arr = list(([dtype(0)] * (pad - len(arr[-pad:])) + arr[-pad:])) 
         
         return arr
@@ -75,16 +80,16 @@ class SplitAndPreprocessDataset(luigi.Task):
         start_trip=('checkin', 'first'),
         end_trip=('checkin', 'last'),
         
-        checkin_list=('checkin_str', list_and_pad(self.window_trip, str)),
-        checkout_list=('checkout_str', list_and_pad(self.window_trip, str)),
-        days_since_2016_list=('days_since_2016', list_and_pad(self.window_trip, int)),
-        duration_list=('duration', list_and_pad(self.window_trip, int)),
+        checkin_list=('checkin_str', list_and_pad(self.window_trip, str, False)),
+        checkout_list=('checkout_str', list_and_pad(self.window_trip, str, False)),
+        days_since_2016_list=('days_since_2016', list_and_pad(self.window_trip, int, False)),
+        duration_list=('duration', list_and_pad(self.window_trip, int, False)),
         city_id_list=('city_id', list_and_pad(self.window_trip, str)),
-        device_class_list=('device_class', list_and_pad(self.window_trip, str)),
-        affiliate_id_list=('affiliate_id', list_and_pad(self.window_trip, str)),
-        booker_country_list=('booker_country', list_and_pad(self.window_trip, str)),
+        device_class_list=('device_class', list_and_pad(self.window_trip, str, False)),
+        affiliate_id_list=('affiliate_id', list_and_pad(self.window_trip, str, False)),
+        booker_country_list=('booker_country', list_and_pad(self.window_trip, str, False)),
         hotel_country_list=('hotel_country', list_and_pad(self.window_trip, str)),
-        step_list=('step', list_and_pad(self.window_trip, int)),
+        step_list=('step', list_and_pad(self.window_trip, int, False)),
 
         last_checkin=('checkin_str', 'last'),
         last_checkout=('checkout_str', 'last'),
@@ -160,15 +165,6 @@ class SplitAndPreprocessDataset(luigi.Task):
     print(df.head())
     print(df.shape)
 
-    # # Split Data
-    # max_timestamp        = df.checkout.max()
-    # init_train_timestamp = max_timestamp - timedelta(days = self.sample_days)
-    # init_test_timestamp  = max_timestamp - timedelta(days = self.test_days)
-
-    # # TODO Garantir que o usuário fique com a sessão no train ou test
-    # df_train = df[(df.checkout >= init_train_timestamp) & (df.checkout < init_test_timestamp)]
-    # df_test  = df[df.checkout >= init_test_timestamp]    
-    
     if self.test_split > 0:
 
         df_trip = df[['utrip_id']].drop_duplicates()
@@ -209,15 +205,15 @@ class SplitAndPreprocessDataset(luigi.Task):
     df_trip_test  = self.group_by_trip(df_test)
 
     # Add Steps Interaction in Train Set
-    df_trip_train = pd.concat([df_trip_train, 
-                             self.add_steps_interaction(df_train, df_train.step.max()-1)])
+    #df_trip_train = pd.concat([df_trip_train, 
+    #                         self.add_steps_interaction(df_train, df_train.step.max()-1)])
     
     print(df_trip_train.head())
     print(df_trip_train.shape)
 
     # Filter after
     # yes, the trips in test set contain at least 3 reservations
-    df_trip_train = df_trip_train[df_trip_train['trip_size'] > 0]
+    df_trip_train = df_trip_train[df_trip_train['trip_size'] >= 3]
     df_trip_test  = df_trip_test[df_trip_test['trip_size'] >= 3]
 
     # Save
@@ -320,7 +316,7 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
 
 
             #TODO
-            df['user_features'] = [[] for i in range(len(df))]            
+            #df['user_features'] = [[] for i in range(len(df))]            
 
         elif self.filter_last_step:
             if self.balance_sample_step > 0:

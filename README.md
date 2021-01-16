@@ -69,10 +69,15 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____4634d6e695 \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____a0064258ae \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_5.csv"  \
 --local-scheduler
 
+{
+    "task_name": "SupervisedModelTraining____mars_gym_model_b____a0064258ae_e85d00171a",
+    "count": 21674,
+    "acc@4": 0.4868044661806773
+}
 
 
 # NARMModel
@@ -109,7 +114,7 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____4634d6e695 \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____eafe105f92 \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_5.csv"  \
 --local-scheduler
 
@@ -117,6 +122,61 @@ PYTHONPATH="." luigi --module evaluation EvaluationTask \
     "task_name": "SupervisedModelTraining____mars_gym_model_b____4634d6e695_97c2fa14b9",
     "count": 21674,
     "acc@4": 0.5088585401863984
+}
+
+
+## without steps
+
+
+```bash
+mars-gym run supervised --project config.conf1_rnn \
+  --recommender-module-class model.NARMModel \
+  --recommender-extra-params '{
+    "n_factors": 100, 
+    "hidden_size": 300, 
+    "n_layers": 2, 
+    "dropout": 0.3, 
+    "from_index_mapping": false,
+    "path_item_embedding": false, 
+    "freeze_embedding": false}' \
+  --data-frames-preparation-extra-params '{
+    "test_split": 0.1, 
+    "window_trip": 10,
+    "column_stratification": "user_id",
+    "filter_last_step": true,
+    "balance_sample_step": 200000,
+    "filter_trip_size": 0 }' \
+  --test-size 0 \
+  --val-size 0.1 \
+  --early-stopping-min-delta 0.0001 \
+  --learning-rate 0.001 \
+  --metrics='["loss", "top_k_acc"]' \
+  --batch-size 128 \
+  --loss-function ce \
+  --loss-function-class loss.FocalLoss \
+  --epochs 100
+```
+
+PYTHONPATH="." luigi --module evaluation EvaluationTask \
+--model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____6fa68b2aa2 \
+--file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_10.csv"  \
+--local-scheduler
+
+
+{
+    "task_name": "SupervisedModelTraining____mars_gym_model_b____59c8a1eca7_00e5083f2c",
+    "count": 21674,
+    "acc@4": 0.5028605702685245
+}
+
+
+## User 
+
+{
+    "task_name": "SupervisedModelTraining____mars_gym_model_b____6fa68b2aa2_b366414d9e",
+    "count": 20741,
+    "acc@4": 0.5052311846101923
 }
 
 

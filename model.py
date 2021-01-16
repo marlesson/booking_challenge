@@ -816,7 +816,7 @@ class NARMModel(RecommenderModule):
 
         self.hidden_size    = hidden_size
         self.n_layers       = n_layers
-        self.embedding_dim  = n_factors
+        self.n_factors  = n_factors
         self.n_time_dim     = 100
         self.n_month_dim    = 10
         
@@ -831,10 +831,10 @@ class NARMModel(RecommenderModule):
         self.month_emb   = nn.Embedding(13, self.n_month_dim)
         self.emb_country = nn.Embedding(n_booker_country_list_dim, n_factors)
         self.emb_affiliate = nn.Embedding(n_affiliate_id_list_dim, n_factors)
-        self.emb_device  = nn.Embedding(n_device_list_dim, 10)        
+        self.emb_device  = nn.Embedding(n_device_list_dim, self.n_month_dim)        
 
         self.emb_dropout = nn.Dropout(dropout)
-        self.input_rnn_dim = self.embedding_dim * 3 + self.n_month_dim 
+        self.input_rnn_dim = self.n_factors * 3 + self.n_month_dim 
 
         self.gru = nn.GRU(self.input_rnn_dim, 
                             self.hidden_size, self.n_layers, bidirectional=True)
@@ -844,8 +844,8 @@ class NARMModel(RecommenderModule):
         self.v_t = nn.Linear(self.hidden_size * 2, 1, bias=False)
 
         self.activate_func = nn.SELU()
-        n_dense_features  = 0
-        output_dense_size = self.hidden_size * 3 + n_dense_features 
+        n_dense_features  = 10
+        output_dense_size = self.hidden_size * 3 + n_dense_features
 
         # self.mlp_dense = nn.Sequential(
         #     nn.Linear(10, n_dense_features),
@@ -861,7 +861,7 @@ class NARMModel(RecommenderModule):
         # )
 
         self.ct_dropout = nn.Dropout(dropout)
-        self.b = nn.Linear(self.embedding_dim, output_dense_size, bias=False)
+        self.b = nn.Linear(self.n_factors, output_dense_size, bias=False)
         
     def index_mapping_max_value(self, key: str) -> int:
         return max(self._index_mapping[key].values())+1
@@ -906,7 +906,7 @@ class NARMModel(RecommenderModule):
 
         # Time/Month Embs
         m_emb   = self.emb_dropout(self.month_emb(start_trip_month.long()))
-        m_embs  = m_emb.unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
+        m_embs   = m_emb.unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
         #m_embs2 = dense_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
@@ -944,7 +944,7 @@ class NARMModel(RecommenderModule):
         c_local = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
 
 
-        c_t     = torch.cat([c_local, c_global], 1) #, dense_features.float()
+        c_t     = torch.cat([c_local, c_global, user_features.float()], 1) #, dense_features.float()
         c_t     = self.ct_dropout(c_t)
         
         item_embs = self.emb(torch.arange(self._n_items).to(device).long())

@@ -80,7 +80,7 @@ def _sort_rank_list(score, neighbors_idx, index_mapping):
         #from IPython import embed; embed()
         item_id   = [int(index_mapping[item]) for item in item_idx if item in neighbors_idx]
     else:
-        item_id   = [int(index_mapping[item]) for item in item_idx]
+        item_id   = [int(index_mapping[item]) for item in item_idx if index_mapping[item] != "M"]
     #
     return item_id
 

@@ -106,10 +106,12 @@ def _change_idx(values: list, neighbors_dict = dict, r = 1):
 
     if random.random() <= r:
         number = np.random.randint(0, len(values))
-        neighbors_dict[values[number]].append(values[number])
-        value  = random.choice(neighbors_dict[values[number]])
 
-        values[number] = value
+        if values[number] in neighbors_dict:
+            neighbors_dict[values[number]].append(values[number])
+            value  = random.choice(neighbors_dict[values[number]])
+
+            values[number] = value
 
     return values
 
