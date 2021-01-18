@@ -1,5 +1,5 @@
 *.csv
-
+notebook/lightning_logs/
 # Project
 output/
 mlruns/

@@ -74,7 +74,6 @@ class SplitAndPreprocessDataset(luigi.Task):
   def group_by_trip(self, df):
     df_trip = df.sort_values(['step']).groupby(['utrip_id']).agg(
         user_id=('user_id', 'first'),
-        user_features=('user_features', 'first'),
         count_unique_city=('city_id', count_hotel),
         trip_size=('checkin', len),
         start_trip=('checkin', 'first'),
@@ -157,10 +156,8 @@ class SplitAndPreprocessDataset(luigi.Task):
     df      = pd.read_csv(BASE_DATASET_FILE, 
                     dtype={"user_id": str, "city_id": str, 'affiliate_id': str,'utrip_id': str}, 
                     parse_dates=['checkin', 'checkout']).sort_values('checkin')
-    
-    df_user = pd.read_csv(os.path.join(DATASET_DIR, "all_user_features.csv"), 
-                    dtype={"user_id": str}, usecols=["user_id", 'user_features'])
-    df      = df.merge(df_user, on='user_id')
+
+    #df      = df.merge(df_user, on='user_id')
 
     print(df.head())
     print(df.shape)
@@ -177,9 +174,6 @@ class SplitAndPreprocessDataset(luigi.Task):
                         dtype={"user_id": str, "city_id": str, 'affiliate_id': str,'utrip_id': str}, 
                         parse_dates=['checkin', 'checkout']).sort_values('checkin')
         
-        
-        
-        df_test  = df_test.merge(df_user, on='user_id', how='left')
 
     print(df_train.shape, df_test.shape)
     # Add General Features
@@ -215,6 +209,16 @@ class SplitAndPreprocessDataset(luigi.Task):
     # yes, the trips in test set contain at least 3 reservations
     df_trip_train = df_trip_train[df_trip_train['trip_size'] >= 3]
     df_trip_test  = df_trip_test[df_trip_test['trip_size'] >= 3]
+
+    # Add User Features
+    df_user = pd.read_csv(os.path.join(DATASET_DIR, "all_user_features.csv"), 
+                    dtype={"user_id": str}, usecols=["user_id", 'user_features'])    
+    df_trip_train  = df_trip_train.merge(df_user, on='user_id', how='left')
+    df_trip_test   = df_trip_test.merge(df_user, on='user_id', how='left')
+
+    # Remove duplicates
+    df_trip_train = df_trip_train.groupby(['utrip_id', 'last_step']).last().reset_index()
+    df_trip_test  = df_trip_test.groupby(['utrip_id', 'last_step']).last().reset_index()
 
     # Save
     df_trip_train.to_csv(self.output()[0].path, index=False)
@@ -313,8 +317,6 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
 
         if data_key == 'TEST_GENERATOR': 
             df = df_last_step
-
-
             #TODO
             #df['user_features'] = [[] for i in range(len(df))]            
 

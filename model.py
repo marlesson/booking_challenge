@@ -834,7 +834,7 @@ class NARMModel(RecommenderModule):
         self.emb_device  = nn.Embedding(n_device_list_dim, self.n_month_dim)        
 
         self.emb_dropout = nn.Dropout(dropout)
-        self.input_rnn_dim = self.n_factors * 3 + self.n_month_dim 
+        self.input_rnn_dim = self.n_factors * 3 + self.n_month_dim + 10
 
         self.gru = nn.GRU(self.input_rnn_dim, 
                             self.hidden_size, self.n_layers, bidirectional=True)
@@ -847,11 +847,11 @@ class NARMModel(RecommenderModule):
         n_dense_features  = 10
         output_dense_size = self.hidden_size * 3 + n_dense_features
 
-        # self.mlp_dense = nn.Sequential(
-        #     nn.Linear(10, n_dense_features),
-        #     self.activate_func,
-        #     nn.Linear(n_dense_features, n_factors),
-        # )
+        self.mlp_user = nn.Sequential(
+            nn.Linear(10, self.n_factors),
+            self.activate_func,
+            nn.Linear(self.n_factors, self.n_factors),
+        )
 
         self.att = Attention(self.input_rnn_dim)
         # self.mlp_emb_features = nn.Sequential(
@@ -900,7 +900,7 @@ class NARMModel(RecommenderModule):
         country_embs = self.emb_dropout(self.emb_country(seq_country))
 
         # e_features  = self.mlp_emb_features(torch.cat([emb_first_hotel_country, 
-        #d_features = self.mlp_dense(user_features.float())
+        #user_features = self.mlp_user(user_features.float())
 
         #emb_first_hotel_country = self.emb_country(first_hotel_country)
 
@@ -908,6 +908,7 @@ class NARMModel(RecommenderModule):
         m_emb   = self.emb_dropout(self.month_emb(start_trip_month.long()))
         m_embs   = m_emb.unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
+        user_features2 = user_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], 10)
         #m_embs2 = dense_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
         # Add Time
@@ -918,7 +919,7 @@ class NARMModel(RecommenderModule):
         #_emb, _w    = self.att(embs.permute(1,0,2), m_embs.permute(1,0,2)).permute(1,0,2)
         #embs        = _emb.permute(1,0,2)
         # Join
-        embs        = torch.cat([embs, affiliate_emb, country_embs, m_embs], 2)      
+        embs        = torch.cat([embs, affiliate_emb, country_embs, m_embs, user_features2], 2)      
         _emb, _w    = self.att(embs.permute(1,0,2), embs.permute(1,0,2))
         embs        = _emb.permute(1,0,2)
                 
