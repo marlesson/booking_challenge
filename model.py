@@ -639,7 +639,7 @@ class Caser(RecommenderModule):
         self.emb_affiliate = nn.Embedding(n_affiliate_id_list_dim, n_factors)
         self.emb_device  = nn.Embedding(n_device_list_dim, 10)        
 
-        self.input_rnn_dim = n_factors * 3 + self.n_month_dim 
+        self.input_rnn_dim = n_factors * 3 + self.n_month_dim + 10
         self.att           = Attention(self.input_rnn_dim)
 
         # vertical conv layer
@@ -729,11 +729,13 @@ class Caser(RecommenderModule):
         m_emb   = self.emb_drop(self.month_emb(start_trip_month.long()))
         m_embs  = m_emb.unsqueeze(1).expand(item_history_ids.shape[0], item_history_ids.shape[1], self.n_month_dim)
 
+        user_features2 = user_features.float().unsqueeze(1).expand(item_history_ids.shape[0], item_history_ids.shape[1], 10)
+
         # Add Time
         t_embs  = self.emb_time(duration_list.float().unsqueeze(2)) # (B, H, E)
         item_embs    = (item_embs + t_embs)/2
 
-        item_embs    = torch.cat([item_embs, affiliate_emb, country_embs, m_embs], 2)
+        item_embs    = torch.cat([item_embs, affiliate_emb, country_embs, m_embs, user_features2], 2)
         item_embs, _w    = self.att(item_embs, item_embs)
 
         item_embs2 = item_embs.unsqueeze(1)
@@ -821,22 +823,26 @@ class NARMModel(RecommenderModule):
         self.n_month_dim    = 10
         
         n_booker_country_list_dim   = self.index_mapping_max_value('booker_country_list')
-        n_affiliate_id_list_dim    = self.index_mapping_max_value('affiliate_id_list')
-        n_device_list_dim         = self.index_mapping_max_value('device_class_list')
+        n_affiliate_id_list_dim     = self.index_mapping_max_value('affiliate_id_list')
+        n_device_list_dim           = self.index_mapping_max_value('device_class_list')
+        self.n_hotel_country_list_dim    = self.index_mapping_max_value('last_hotel_country')
 
         self.emb_user    = nn.Embedding(self._n_users, n_factors)
         self.emb         = load_embedding(self._n_items, n_factors, path_item_embedding, 
                                         from_index_mapping, index_mapping, freeze_embedding)
         self.time_emb    = TimeEmbedding(self.n_time_dim, n_factors)
         self.month_emb   = nn.Embedding(13, self.n_month_dim)
-        self.emb_country = nn.Embedding(n_booker_country_list_dim, n_factors)
         self.emb_affiliate = nn.Embedding(n_affiliate_id_list_dim, n_factors)
+        self.emb_country = nn.Embedding(n_booker_country_list_dim, self.n_month_dim)
         self.emb_device  = nn.Embedding(n_device_list_dim, self.n_month_dim)        
+        self.emb_hotel_country  = nn.Embedding(self.n_hotel_country_list_dim, n_factors)        
 
         self.emb_dropout = nn.Dropout(dropout)
-        self.input_rnn_dim = self.n_factors * 3 + self.n_month_dim + 10
+        self.input_rnn_dim = self.n_factors * 2 + self.n_month_dim * 3
 
-        self.gru = nn.GRU(self.input_rnn_dim, 
+        self.gru  = nn.GRU(self.input_rnn_dim, 
+                            self.hidden_size, self.n_layers, bidirectional=True)
+        self.gru2  = nn.GRU(600, 
                             self.hidden_size, self.n_layers, bidirectional=True)
 
         self.a_1 = nn.Linear(self.hidden_size * 2, self.hidden_size * 2, bias=False)
@@ -862,7 +868,8 @@ class NARMModel(RecommenderModule):
 
         self.ct_dropout = nn.Dropout(dropout)
         self.b = nn.Linear(self.n_factors, output_dense_size, bias=False)
-        
+        self.h = nn.Linear(self.n_factors, output_dense_size, bias=False)
+
     def index_mapping_max_value(self, key: str) -> int:
         return max(self._index_mapping[key].values())+1
         
@@ -870,8 +877,7 @@ class NARMModel(RecommenderModule):
         return input.view(input.size(0), -1)
 
     def normalize(self, x: torch.Tensor, dim: int = 1) -> torch.Tensor:
-        if self.use_normalize:
-            x = F.normalize(x, p=2, dim=dim)
+        x = F.normalize(x, p=2, dim=dim)
         return x
 
     def forward(self,   session_ids, 
@@ -916,12 +922,9 @@ class NARMModel(RecommenderModule):
         embs    = (embs + t_embs)/2
 
         # att
-        #_emb, _w    = self.att(embs.permute(1,0,2), m_embs.permute(1,0,2)).permute(1,0,2)
-        #embs        = _emb.permute(1,0,2)
-        # Join
-        embs        = torch.cat([embs, affiliate_emb, country_embs, m_embs, user_features2], 2)      
-        _emb, _w    = self.att(embs.permute(1,0,2), embs.permute(1,0,2))
-        embs        = _emb.permute(1,0,2)
+        embs        = torch.cat([embs, affiliate_emb, country_embs, m_embs, user_features2], 2).permute(1,0,2)
+        att_emb, _w = self.att(embs, embs)
+        embs        = att_emb.permute(1,0,2)
                 
         gru_out, hidden = self.gru(embs, hidden)
 
@@ -944,14 +947,16 @@ class NARMModel(RecommenderModule):
                     .view(mask.size())
         c_local = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
 
-
         c_t     = torch.cat([c_local, c_global, user_features.float()], 1) #, dense_features.float()
         c_t     = self.ct_dropout(c_t)
         
         item_embs = self.emb(torch.arange(self._n_items).to(device).long())
         scores    = torch.matmul(c_t, self.b(item_embs).permute(1, 0))
 
-        return scores
+        hotel_embs = self.emb_hotel_country(torch.arange(self.n_hotel_country_list_dim).to(device).long())
+        scores2   = torch.matmul(c_t, self.h(hotel_embs).permute(1, 0))
+
+        return scores, scores2
 
     def recommendation_score(self, session_ids, 
                                     item_ids, 
@@ -964,17 +969,17 @@ class NARMModel(RecommenderModule):
                                     start_trip_month, 
                                     dense_features):
         
-        scores = self.forward(session_ids, 
-                                item_ids, 
-                                item_history_ids, 
-                                affiliate_id_list,
-                                device_list,
-                                user_features,
-                                booker_country_list,
-                                duration_list, 
-                                start_trip_month, 
-                                dense_features)
-        scores = scores[torch.arange(scores.size(0)),item_ids]
+        scores, _ = self.forward(session_ids, 
+                                    item_ids, 
+                                    item_history_ids, 
+                                    affiliate_id_list,
+                                    device_list,
+                                    user_features,
+                                    booker_country_list,
+                                    duration_list, 
+                                    start_trip_month, 
+                                    dense_features)
+        #scores = scores[torch.arange(scores.size(0)),item_ids]
 
         return scores
 

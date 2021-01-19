@@ -315,10 +315,10 @@ class EvaluationTask(BaseEvaluationTask):
                 input_params = x if isinstance(x, list) or isinstance(x, tuple) else [x]
                 input_params = [t.to(self.torch_device) if isinstance(t, torch.Tensor) else t for t in input_params]
 
-                scores_tensor: torch.Tensor  = model(*input_params)
+                scores_tensor: torch.Tensor  = model.recommendation_score(*input_params)
                 scores_batch = scores_tensor.detach().cpu().numpy()
                 #neighbors_dict
-                
+                #from IPython import embed; embed()
                 
                 # Neighbors
                 if neighbors_dict:

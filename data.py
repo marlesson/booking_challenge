@@ -63,6 +63,8 @@ class SplitAndPreprocessDataset(luigi.Task):
     df['duration']        = (df['checkout'] - df['checkin']).dt.days
     df['checkin_str']     = df['checkin'].astype(str)
     df['checkout_str']    = df['checkout'].astype(str)
+    df['checkin_int']     = df['checkin'].astype(int)/10**9/60/60/24
+    df['checkout_int']    = df['checkout'].astype(int)/10**9/60/60/24
     df['days_since_2016'] = pd.to_datetime(df['checkin']).sub(pd.Timestamp('2016-01-01 00:00:00')).dt.days
     df['step'] = 1
     df['step'] = df.groupby(['utrip_id']).step.cumsum()
@@ -78,9 +80,8 @@ class SplitAndPreprocessDataset(luigi.Task):
         trip_size=('checkin', len),
         start_trip=('checkin', 'first'),
         end_trip=('checkin', 'last'),
-        
-        checkin_list=('checkin_str', list_and_pad(self.window_trip, str, False)),
-        checkout_list=('checkout_str', list_and_pad(self.window_trip, str, False)),
+        checkin_list=('checkin_int', list_and_pad(self.window_trip, int, False)),
+        checkout_list=('checkout_int', list_and_pad(self.window_trip, int, False)),
         days_since_2016_list=('days_since_2016', list_and_pad(self.window_trip, int, False)),
         duration_list=('duration', list_and_pad(self.window_trip, int, False)),
         city_id_list=('city_id', list_and_pad(self.window_trip, str)),
@@ -307,7 +308,7 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
 
         df['is_multiple_country'] = df['hotel_country_list'].apply(lambda x: len(list(np.unique(x))) > 1 ).astype(int)
         df['trip_size']     = df['trip_size']/LIMIT_TRIP_SIZE
-        df['duration_sum']  = df['duration_list'].apply(sum)/(LIMIT_DURATION_SUM*5)
+        df['duration_sum']  = df['duration_list'].apply(sum)/(LIMIT_DURATION_SUM*10)
 
         df['dense_features'] = df[dense_features].values.tolist()
 
@@ -342,5 +343,5 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
         return df
     
     def sample_balance_df(self, df, n_samples, state=42):
-        df['sample_weights'] = 1/df['country_count']
+        df['sample_weights'] = 1/np.log(1+df['country_count'])
         return df.sample(n_samples, weights='sample_weights', random_state=state)
