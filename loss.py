@@ -41,13 +41,14 @@ def top_k_acc(input:torch.Tensor, targets:torch.Tensor, k:int=4):
 
 
 class FocalLoss(_Loss):
-  def __init__(self, alpha=1, gamma=2, logits=False, size_average=None, reduce=None, reduction="mean"):
+  def __init__(self, alpha=1, gamma=2, c=0.8, logits=False, size_average=None, reduce=None, reduction="mean"):
     super().__init__(size_average, reduce, reduction)
     self.reduction = reduction
     self.alpha  = alpha
     self.gamma  = gamma
     self.logits = logits
     self.reduce = reduce
+    self.c      = c
     self.loss   = nn.CrossEntropyLoss(reduction='none')
 
   def forward(self, inputs, input2, targets, last_hotel_country):
@@ -57,7 +58,7 @@ class FocalLoss(_Loss):
     pt        = torch.exp(-ce_loss)
     _loss     = self.alpha * (1-pt)**self.gamma * ce_loss
 
-    #_loss = _loss + ce_loss2
+    _loss     = _loss*self.c + ce_loss2*(1-self.c)
 
     if self.reduction == "mean":
         return _loss.mean()

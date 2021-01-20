@@ -831,6 +831,7 @@ class NARMModel(RecommenderModule):
         self.emb         = load_embedding(self._n_items, n_factors, path_item_embedding, 
                                         from_index_mapping, index_mapping, freeze_embedding)
         self.time_emb    = TimeEmbedding(self.n_time_dim, n_factors)
+        self.time_emb2    = TimeEmbedding(self.n_time_dim, n_factors)
         self.month_emb   = nn.Embedding(13, self.n_month_dim)
         self.emb_affiliate = nn.Embedding(n_affiliate_id_list_dim, n_factors)
         self.emb_country = nn.Embedding(n_booker_country_list_dim, self.n_month_dim)
@@ -842,8 +843,8 @@ class NARMModel(RecommenderModule):
 
         self.gru  = nn.GRU(self.input_rnn_dim, 
                             self.hidden_size, self.n_layers, bidirectional=True)
-        self.gru2  = nn.GRU(600, 
-                            self.hidden_size, self.n_layers, bidirectional=True)
+        # self.gru2  = nn.GRU(600, 
+        #                     self.hidden_size, self.n_layers, bidirectional=True)
 
         self.a_1 = nn.Linear(self.hidden_size * 2, self.hidden_size * 2, bias=False)
         self.a_2 = nn.Linear(self.hidden_size, self.hidden_size * 2, bias=False)
@@ -853,11 +854,11 @@ class NARMModel(RecommenderModule):
         n_dense_features  = 10
         output_dense_size = self.hidden_size * 3 + n_dense_features
 
-        self.mlp_user = nn.Sequential(
-            nn.Linear(10, self.n_factors),
-            self.activate_func,
-            nn.Linear(self.n_factors, self.n_factors),
-        )
+        # self.mlp_user = nn.Sequential(
+        #     nn.Linear(10, self.n_factors),
+        #     self.activate_func,
+        #     nn.Linear(self.n_factors, self.n_factors),
+        # )
 
         self.att = Attention(self.input_rnn_dim)
         # self.mlp_emb_features = nn.Sequential(
@@ -885,6 +886,7 @@ class NARMModel(RecommenderModule):
                         item_history_ids, 
                         affiliate_id_list,
                         device_list,
+                        checkin_list,
                         user_features,
                         booker_country_list,
                         duration_list, 
@@ -896,13 +898,15 @@ class NARMModel(RecommenderModule):
         seq_country = booker_country_list.permute(1,0)
         seq_affiliate = affiliate_id_list.permute(1,0)
         seq_device = device_list.permute(1,0)
+        seq_checkin = checkin_list.float().permute(1,0)
         seq_user    = session_ids#.permute(1,0)
 
         hidden      = self.init_hidden(seq.size(1)).to(device)
         embs        = self.emb_dropout(self.emb(seq))
         affiliate_emb = self.emb_dropout(self.emb_affiliate(seq_affiliate))
+        checkin_emb = self.emb_dropout(self.time_emb2(seq_checkin.unsqueeze(2)))
         user_emb    = self.emb_dropout(self.emb_user(seq_user))
-        device_emb = self.emb_dropout(self.emb_device(seq_device))
+        device_emb  = self.emb_dropout(self.emb_device(seq_device))
         country_embs = self.emb_dropout(self.emb_country(seq_country))
 
         # e_features  = self.mlp_emb_features(torch.cat([emb_first_hotel_country, 
@@ -914,14 +918,15 @@ class NARMModel(RecommenderModule):
         m_emb   = self.emb_dropout(self.month_emb(start_trip_month.long()))
         m_embs   = m_emb.unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
-        user_features2 = user_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], 10)
+        user_features2 = user_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
         #m_embs2 = dense_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
         # Add Time
+        
         t_embs  = self.time_emb(duration_list.float().unsqueeze(2)).permute(1,0,2)  # (H, B, E)
         embs    = (embs + t_embs)/2
 
-        # att
+        # att , user_features2
         embs        = torch.cat([embs, affiliate_emb, country_embs, m_embs, user_features2], 2).permute(1,0,2)
         att_emb, _w = self.att(embs, embs)
         embs        = att_emb.permute(1,0,2)
@@ -947,7 +952,7 @@ class NARMModel(RecommenderModule):
                     .view(mask.size())
         c_local = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
 
-        c_t     = torch.cat([c_local, c_global, user_features.float()], 1) #, dense_features.float()
+        c_t     = torch.cat([c_local, c_global, user_features.float()], 1) #, 
         c_t     = self.ct_dropout(c_t)
         
         item_embs = self.emb(torch.arange(self._n_items).to(device).long())
@@ -963,6 +968,7 @@ class NARMModel(RecommenderModule):
                                     item_history_ids, 
                                     affiliate_id_list,
                                     device_list,
+                                    checkin_list,
                                     user_features,
                                     booker_country_list,
                                     duration_list, 
@@ -974,6 +980,7 @@ class NARMModel(RecommenderModule):
                                     item_history_ids, 
                                     affiliate_id_list,
                                     device_list,
+                                    checkin_list,
                                     user_features,
                                     booker_country_list,
                                     duration_list, 

@@ -36,6 +36,7 @@ conf1_rnn = ProjectConfig(
         Column("city_id_list", IOType.INDEXABLE_ARRAY),
         Column("affiliate_id_list", IOType.INDEXABLE_ARRAY),
         Column("device_class_list", IOType.INDEXABLE_ARRAY),
+        Column("checkin_list", IOType.INT_ARRAY),
         Column("user_features", IOType.FLOAT_ARRAY), 
         Column("booker_country_list", IOType.INDEXABLE_ARRAY, same_index_as="last_hotel_country"),
         Column("duration_list", IOType.INT_ARRAY), #days_since_2016_list
