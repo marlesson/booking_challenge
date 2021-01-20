@@ -827,6 +827,11 @@ class NARMModel(RecommenderModule):
         n_device_list_dim           = self.index_mapping_max_value('device_class_list')
         self.n_hotel_country_list_dim    = self.index_mapping_max_value('last_hotel_country')
 
+        self.input_rnn_dim = self.n_factors * 2 + self.n_month_dim * 3
+        n_dense_features   = 10
+        output_dense_size  = self.hidden_size * 3 + n_dense_features
+
+
         self.emb_user    = nn.Embedding(self._n_users, n_factors)
         self.emb         = load_embedding(self._n_items, n_factors, path_item_embedding, 
                                         from_index_mapping, index_mapping, freeze_embedding)
@@ -839,33 +844,21 @@ class NARMModel(RecommenderModule):
         self.emb_hotel_country  = nn.Embedding(self.n_hotel_country_list_dim, n_factors)        
 
         self.emb_dropout = nn.Dropout(dropout)
-        self.input_rnn_dim = self.n_factors * 2 + self.n_month_dim * 3
-
         self.gru  = nn.GRU(self.input_rnn_dim, 
                             self.hidden_size, self.n_layers, bidirectional=True)
-        # self.gru2  = nn.GRU(600, 
-        #                     self.hidden_size, self.n_layers, bidirectional=True)
 
         self.a_1 = nn.Linear(self.hidden_size * 2, self.hidden_size * 2, bias=False)
         self.a_2 = nn.Linear(self.hidden_size, self.hidden_size * 2, bias=False)
         self.v_t = nn.Linear(self.hidden_size * 2, 1, bias=False)
 
         self.activate_func = nn.SELU()
-        n_dense_features  = 10
-        output_dense_size = self.hidden_size * 3 + n_dense_features
-
-        # self.mlp_user = nn.Sequential(
-        #     nn.Linear(10, self.n_factors),
-        #     self.activate_func,
-        #     nn.Linear(self.n_factors, self.n_factors),
+        # self.mlp_dense = nn.Sequential(
+        #     nn.Linear(output_dense_size, output_dense_size),
+        #     nn.Tanh(),
+        #     nn.Linear(output_dense_size, output_dense_size),
         # )
 
         self.att = Attention(self.input_rnn_dim)
-        # self.mlp_emb_features = nn.Sequential(
-        #     nn.Linear(1 * n_factors + self.n_month_dim, n_factors),
-        #     self.activate_func,
-        #     nn.Linear(n_factors, n_factors),
-        # )
 
         self.ct_dropout = nn.Dropout(dropout)
         self.b = nn.Linear(self.n_factors, output_dense_size, bias=False)
@@ -929,9 +922,15 @@ class NARMModel(RecommenderModule):
         # att , user_features2
         embs        = torch.cat([embs, affiliate_emb, country_embs, m_embs, user_features2], 2).permute(1,0,2)
         att_emb, _w = self.att(embs, embs)
-        embs        = att_emb.permute(1,0,2)
-                
-        gru_out, hidden = self.gru(embs, hidden)
+        embs        = att_emb.permute(1,0,2) # (H, B, E)
+        
+        # Mask
+        mask        = torch.where(seq.permute(1, 0) > IDX_FIX, torch.tensor([1.], device = device), 
+                                torch.tensor([0.], device = device))
+                                        
+        # Clear mask
+        #embs        = mask.unsqueeze(2).expand_as(embs.permute(1,0,2)).permute(1,0,2) * embs        
+        gru_out, hidden = self.gru(embs, hidden) 
 
         # fetch the last hidden state of last timestamp
         ht      = hidden[-1]
@@ -941,19 +940,15 @@ class NARMModel(RecommenderModule):
         q1 = self.a_1(gru_out.contiguous().view(-1, self.hidden_size * 2)).view(gru_out.size())  
         q2 = self.a_2(ht)
 
-        mask      = torch.where(seq.permute(1, 0) > IDX_FIX, torch.tensor([1.], device = device), 
-                        torch.tensor([0.], device = device))
-
         q2_expand = q2.unsqueeze(1).expand_as(q1)
         q2_masked = mask.unsqueeze(2).expand_as(q1) * q2_expand
 
         alpha   = self.v_t(torch.sigmoid(q1 + q2_masked)\
                     .view(-1, self.hidden_size * 2))\
                     .view(mask.size())
-        c_local = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
-
-        c_t     = torch.cat([c_local, c_global, user_features.float()], 1) #, 
-        c_t     = self.ct_dropout(c_t)
+        c_local   = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
+        c_t       = torch.cat([c_local, c_global, user_features.float()], 1) #, 
+        c_t       = self.ct_dropout(c_t)
         
         item_embs = self.emb(torch.arange(self._n_items).to(device).long())
         scores    = torch.matmul(c_t, self.b(item_embs).permute(1, 0))
@@ -961,7 +956,7 @@ class NARMModel(RecommenderModule):
         hotel_embs = self.emb_hotel_country(torch.arange(self.n_hotel_country_list_dim).to(device).long())
         scores2   = torch.matmul(c_t, self.h(hotel_embs).permute(1, 0))
 
-        return scores, scores2
+        return scores, scores2, c_t
 
     def recommendation_score(self, session_ids, 
                                     item_ids, 

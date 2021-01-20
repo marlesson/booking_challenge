@@ -9,13 +9,16 @@ Experimentos (base:0.51797)
 * Checkin como modelo de tempo no emb (0.511420)
 * Balancear as duas saídas do modelo loss (0.52337) with 0.8
 * Balancear as duas saídas do modelo loss (mesmo MLP final) (0.51917)
-* normalizar c_t (0.52161)
-* normalizar c_t depois de uma MLP
 * Remover usuario emb de da RNN (0.5062)
 * Remover usuario emb de da End MLP e deixar RNN (0.51825)
 * Remover usuario emb all (0.5099903)
-* L2 regularize c_t
-* mask PAD zero rnn 
+* normalizar c_t (0.52161)
+* normalizar c_t depois de uma MLP (0.52023)
+* normalizar c_t depois de uma MLP Tanh (0.48705)
+* MLP Tanh sem normalizar (0.49836)
+* mask PAD zero rnn (0.50569)
+* L2 Regularization no Emb (1e-2)
+* Weight decay Geral
 * Tying Word  Classify
 * Usar os vizinhos para zerar os scores no treino, pegar a loss apenas de quem é vizinho. 
 
@@ -170,6 +173,9 @@ mars-gym run supervised --project config.conf1_rnn \
   --metrics='["loss", "top_k_acc", "top_k_acc2"]' \
   --batch-size 128 \
   --optimizer "radam" \
+  --optimizer-params '{
+    "weight_decay": 1e-2
+    }' \
   --loss-function ce \
   --loss-function-class loss.FocalLoss \
   --loss-function-params '{
@@ -182,7 +188,7 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____cad07cf47e \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____bd470062a0 \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_10.csv"  \
 --local-scheduler
 
