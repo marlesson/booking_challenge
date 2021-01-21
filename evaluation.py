@@ -77,8 +77,13 @@ def _sort_rank_list(score, neighbors_idx, index_mapping):
     
     if neighbors_idx and len(np.unique(neighbors_idx)) > 0:
         neighbors_idx = np.unique(neighbors_idx)
-        #from IPython import embed; embed()
-        item_id   = [int(index_mapping[item]) for item in item_idx if item in neighbors_idx]
+        
+        # Not Neighbors
+        n_idx = list(set(np.arange(len(score))) - set(neighbors_idx))
+        score[n_idx] = 0
+
+        item_idx  = np.argsort(score)[::-1][:SCORE_LIMIT]
+        item_id   = [int(index_mapping[item]) for item in item_idx if item in neighbors_idx and index_mapping[item] != "M"]
     else:
         item_id   = [int(index_mapping[item]) for item in item_idx if index_mapping[item] != "M"]
     #
@@ -305,7 +310,7 @@ class EvaluationTask(BaseEvaluationTask):
         idx_item_id = 2
 
         def get_neighbors(n, neighbors_dict):
-            neighbors = [neighbors_dict[i] for i in n]
+            neighbors = [neighbors_dict[i] for i in n if i in neighbors_dict]
             neighbors = list(np.unique(sum(neighbors, [])))
             return neighbors
 
@@ -322,8 +327,14 @@ class EvaluationTask(BaseEvaluationTask):
                 
                 # Neighbors
                 if neighbors_dict:
-                    last_item_idx = x[idx_item_id].numpy()[:,-1]
-                    #neighbors_idx = [neighbors_dict[i] for i in last_item_idx]
+                    # last_item_idx = x[idx_item_id].numpy()[:,-1]
+                    # neighbors_idx = []
+                    # for i in last_item_idx:
+                    #     if i in neighbors_dict:
+                    #         neighbors_idx.append(neighbors_dict[i])
+                    #     else:
+                    #         neighbors_idx.append(list(neighbors_dict.keys()))
+                    
                     neighbors_idx = [get_neighbors(n, neighbors_dict) for n in x[idx_item_id].numpy()]
                     #from IPython import embed; embed()
                 else:

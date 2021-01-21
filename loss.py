@@ -51,14 +51,22 @@ class FocalLoss(_Loss):
     self.c      = c
     self.loss   = nn.CrossEntropyLoss(reduction='none')
 
-  def forward(self, inputs, input2, targets, last_hotel_country):
+  def focal(self, inputs, targets):
     ce_loss   = self.loss(inputs, targets)
-    ce_loss2  = self.loss(input2, last_hotel_country)
-
     pt        = torch.exp(-ce_loss)
-    _loss     = self.alpha * (1-pt)**self.gamma * ce_loss
+    loss     = self.alpha * (1-pt)**self.gamma * ce_loss
+    return loss
 
-    _loss     = _loss*self.c + ce_loss2*(1-self.c)
+  def forward(self, inputs1, inputs2, targets1, targets2):
+    # ce_loss1   = self.loss(inputs1, targets1)
+    # ce_loss2   = self.loss(inputs2, targets2)
+
+    # pt        = torch.exp(-ce_loss)
+    # _loss     = self.alpha * (1-pt)**self.gamma * ce_loss
+
+    _loss1    = self.focal(inputs1, targets1)
+    _loss2    = self.focal(inputs2, targets2)
+    _loss     = _loss1*self.c + _loss2*(1-self.c)
 
     if self.reduction == "mean":
         return _loss.mean()

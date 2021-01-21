@@ -956,7 +956,7 @@ class NARMModel(RecommenderModule):
         hotel_embs = self.emb_hotel_country(torch.arange(self.n_hotel_country_list_dim).to(device).long())
         scores2   = torch.matmul(c_t, self.h(hotel_embs).permute(1, 0))
 
-        return scores, scores2, c_t
+        return scores, scores2
 
     def recommendation_score(self, session_ids, 
                                     item_ids, 

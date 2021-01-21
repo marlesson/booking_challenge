@@ -1,5 +1,7 @@
 *.csv
 notebook/lightning_logs/
+notebook/metadada/
+
 # Project
 output/
 mlruns/
