@@ -106,6 +106,20 @@ def _choose_except(values: list, exception: Any) -> int:
         if value != exception:
             return value
 
+def _choose_random_sample(item_id= int, neighbors_dict = dict, k=500):
+    all_idx       = list(neighbors_dict.keys())
+    neighbors_idx = neighbors_dict[item_id]
+    if len(neighbors_idx) > 0:
+        neighbors_idx = random.sample(neighbors_idx, k)
+        neighbors_idx.append(item_id)
+
+        n_idx = list(set(all_idx) - set(neighbors_idx))
+        #neighbors.append(item_id)
+    else:
+        n_idx = random.sample(all_idx, k)
+    
+    return np.array(n_idx)
+
 def _change_idx(values: list, neighbors_dict = dict, r = 1):
 
     if random.random() <= r:
@@ -233,7 +247,7 @@ class InteractionsDatasetWithMask(Dataset):
                 neighbors_dict[3] = []
         
         self.neighbors_dict = neighbors_dict
-        self.prob_neighbors = 0.1
+        self.prob_neighbors = 1
 
         if project_config.item_is_input:
             self._item_input_index = self._input_columns.index(
@@ -300,12 +314,15 @@ class InteractionsDatasetWithMask(Dataset):
                 self._convert_dtype(rows[column.name].values, column.type)
                 for column in self._project_config.auxiliar_output_columns
             )
-        # print(inputs)
-        if self._data_key == 'train_data':
-            _neighbors_dict = self.neighbors_dict.copy()
-            list_modif = np.array([_change_idx(l,_neighbors_dict) for l in inputs[self._list_input_index]])
-        #inputs[self._list_input_index]
 
+        _neighbors_dict = self.neighbors_dict.copy()
+        if self._data_key == 'train_data':
+            list_modif = np.array([_change_idx(l,_neighbors_dict) for l in inputs[self._list_input_index]])
+
+        #add neighbors in output
+        #
+        output = tuple(output) + tuple([np.array([_choose_random_sample(i, _neighbors_dict) for i in output[0]])])
+        
         return inputs, output
 
 class InteractionsWithNegativeItemGenerationDataset(InteractionsDataset):

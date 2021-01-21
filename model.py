@@ -853,8 +853,9 @@ class NARMModel(RecommenderModule):
 
         self.activate_func = nn.SELU()
         # self.mlp_dense = nn.Sequential(
+        #     nn.BatchNorm1d(output_dense_size),
         #     nn.Linear(output_dense_size, output_dense_size),
-        #     nn.Tanh(),
+        #     nn.ReLU(),
         #     nn.Linear(output_dense_size, output_dense_size),
         # )
 
@@ -902,9 +903,6 @@ class NARMModel(RecommenderModule):
         device_emb  = self.emb_dropout(self.emb_device(seq_device))
         country_embs = self.emb_dropout(self.emb_country(seq_country))
 
-        # e_features  = self.mlp_emb_features(torch.cat([emb_first_hotel_country, 
-        #user_features = self.mlp_user(user_features.float())
-
         #emb_first_hotel_country = self.emb_country(first_hotel_country)
 
         # Time/Month Embs
@@ -915,26 +913,27 @@ class NARMModel(RecommenderModule):
         #m_embs2 = dense_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
         # Add Time
-        
         t_embs  = self.time_emb(duration_list.float().unsqueeze(2)).permute(1,0,2)  # (H, B, E)
         embs    = (embs + t_embs)/2
 
-        # att , user_features2
+        # Concat Emb
         embs        = torch.cat([embs, affiliate_emb, country_embs, m_embs, user_features2], 2).permute(1,0,2)
-        att_emb, _w = self.att(embs, embs)
-        embs        = att_emb.permute(1,0,2) # (H, B, E)
-        
+
         # Mask
         mask        = torch.where(seq.permute(1, 0) > IDX_FIX, torch.tensor([1.], device = device), 
                                 torch.tensor([0.], device = device))
-                                        
-        # Clear mask
-        #embs        = mask.unsqueeze(2).expand_as(embs.permute(1,0,2)).permute(1,0,2) * embs        
+        #embs        = embs * mask.unsqueeze(2).expand_as(embs)#.permute(1,0,2)        
+
+        # Attention
+        att_emb, _w = self.att(embs, embs)
+        embs        = att_emb.permute(1,0,2) # (H, B, E)
+                       
+        # RNN
         gru_out, hidden = self.gru(embs, hidden) 
 
         # fetch the last hidden state of last timestamp
-        ht      = hidden[-1]
-        gru_out = gru_out.permute(1, 0, 2)
+        ht       = hidden[-1]
+        gru_out  = gru_out.permute(1, 0, 2)
 
         c_global = ht
         q1 = self.a_1(gru_out.contiguous().view(-1, self.hidden_size * 2)).view(gru_out.size())  
@@ -947,16 +946,15 @@ class NARMModel(RecommenderModule):
                     .view(-1, self.hidden_size * 2))\
                     .view(mask.size())
         c_local   = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
-        c_t       = torch.cat([c_local, c_global, user_features.float()], 1) #, 
-        c_t       = self.ct_dropout(c_t)
+        c_t       = torch.cat([c_local, c_global, user_features.float()], 1)
         
         item_embs = self.emb(torch.arange(self._n_items).to(device).long())
-        scores    = torch.matmul(c_t, self.b(item_embs).permute(1, 0))
+        out1    = torch.matmul(self.ct_dropout(c_t), self.b(item_embs).permute(1, 0))
 
         hotel_embs = self.emb_hotel_country(torch.arange(self.n_hotel_country_list_dim).to(device).long())
-        scores2   = torch.matmul(c_t, self.h(hotel_embs).permute(1, 0))
+        out2   = torch.matmul(self.ct_dropout(c_t), self.h(hotel_embs).permute(1, 0))
 
-        return scores, scores2, c_t
+        return out1, out2, c_t
 
     def recommendation_score(self, session_ids, 
                                     item_ids, 
@@ -970,7 +968,7 @@ class NARMModel(RecommenderModule):
                                     start_trip_month, 
                                     dense_features):
         
-        scores, _ = self.forward(session_ids, 
+        scores, _, _ = self.forward(session_ids, 
                                     item_ids, 
                                     item_history_ids, 
                                     affiliate_id_list,

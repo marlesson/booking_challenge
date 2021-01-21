@@ -73,13 +73,15 @@ def acc(r, k =4):
 def _sort_rank_list(score, neighbors_idx, index_mapping):
     # UNK, PAD, PAD
     score[0]  = score[1] = score[2] = score[3] = 0
-    item_idx  = np.argsort(score)[::-1][:SCORE_LIMIT]
+    
     
     if neighbors_idx and len(np.unique(neighbors_idx)) > 0:
         neighbors_idx = np.unique(neighbors_idx)
+        item_idx  = np.argsort(score)[::-1]
         #from IPython import embed; embed()
         item_id   = [int(index_mapping[item]) for item in item_idx if item in neighbors_idx]
     else:
+        item_idx  = np.argsort(score)[::-1][:SCORE_LIMIT]
         item_id   = [int(index_mapping[item]) for item in item_idx if index_mapping[item] != "M"]
     #
     return item_id
@@ -305,7 +307,8 @@ class EvaluationTask(BaseEvaluationTask):
         idx_item_id = 2
 
         def get_neighbors(n, neighbors_dict):
-            neighbors = [neighbors_dict[i] for i in n]
+            neighbors = [neighbors_dict[i] for i in n if i in neighbors_dict]
+            #from IPython import embed; embed()
             neighbors = list(np.unique(sum(neighbors, [])))
             return neighbors
 
@@ -323,12 +326,17 @@ class EvaluationTask(BaseEvaluationTask):
                 # Neighbors
                 if neighbors_dict:
                     last_item_idx = x[idx_item_id].numpy()[:,-1]
-                    #neighbors_idx = [neighbors_dict[i] for i in last_item_idx]
-                    neighbors_idx = [get_neighbors(n, neighbors_dict) for n in x[idx_item_id].numpy()]
+                    neighbors_idx = []
+                    for i in last_item_idx:
+                        if i in neighbors_dict:
+                            neighbors_idx.append(neighbors_dict[i])
+                        else:
+                            neighbors_idx.append(list(neighbors_dict.keys()))
+                    #neighbors_idx = [get_neighbors(n, neighbors_dict) for n in x[idx_item_id].numpy()]
                     #from IPython import embed; embed()
                 else:
-                    #scores.extend(scores_batch)
                     neighbors_idx = [None for i in range(len(scores_batch))]
+                
                 # Test
                 _sort_rank_list(scores_batch[0], neighbors_idx=neighbors_idx[0], index_mapping=reverse_index_mapping)
                 

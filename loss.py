@@ -17,8 +17,8 @@ import torch.nn.functional as F
 @metrics.lambda_metric("top_k_acc", on_epoch=False)
 def top_k_acc(input:torch.Tensor, targets:torch.Tensor, k:int=4):
     "Computes the Top-k accuracy (target is in the top k predictions)."
-    targets, _ = targets
-    input,  _  = input
+    targets, _, _ = targets
+    input,  _, _  = input
 
     input = input.topk(k=k, dim=-1)[1]
     #targets, _ = targets
@@ -31,8 +31,8 @@ def top_k_acc(input:torch.Tensor, targets:torch.Tensor, k:int=4):
 @metrics.lambda_metric("top_k_acc2", on_epoch=False)
 def top_k_acc(input:torch.Tensor, targets:torch.Tensor, k:int=4):
     "Computes the Top-k accuracy (target is in the top k predictions)."
-    _, targets = targets
-    _,  input  = input
+    _, targets, _ = targets
+    _,  input, _  = input
 
     input = input.topk(k=k, dim=-1)[1]
     #targets, _ = targets
@@ -41,31 +41,41 @@ def top_k_acc(input:torch.Tensor, targets:torch.Tensor, k:int=4):
 
 
 class FocalLoss(_Loss):
-  def __init__(self, alpha=1, gamma=2, c=0.8, logits=False, size_average=None, reduce=None, reduction="mean"):
-    super().__init__(size_average, reduce, reduction)
-    self.reduction = reduction
-    self.alpha  = alpha
-    self.gamma  = gamma
-    self.logits = logits
-    self.reduce = reduce
-    self.c      = c
-    self.loss   = nn.CrossEntropyLoss(reduction='none')
+    def __init__(self, alpha=1, gamma=2, c=0.8, l2=0, logits=False, 
+                        size_average=None, reduce=None, reduction="mean"):
+        super().__init__(size_average, reduce, reduction)
+        self.reduction = reduction
+        self.alpha  = alpha
+        self.gamma  = gamma
+        self.logits = logits
+        self.reduce = reduce
+        self.c      = c
+        self.l2     = l2
+        self.loss   = nn.CrossEntropyLoss(reduction='none')
 
-  def forward(self, inputs, input2, targets, last_hotel_country):
-    ce_loss   = self.loss(inputs, targets)
-    ce_loss2  = self.loss(input2, last_hotel_country)
+    def forward(self, inputs, inputs2, emb, targets, targets2, neighbors):
+        self.fix_inputs_by_neighbors(inputs, neighbors)
+        ce_loss   = self.loss(inputs, targets)
+        loss2     = self.loss(inputs2, targets2)
 
-    pt        = torch.exp(-ce_loss)
-    _loss     = self.alpha * (1-pt)**self.gamma * ce_loss
+        pt        = torch.exp(-ce_loss)
+        loss1     = self.alpha * (1-pt)**self.gamma * ce_loss
 
-    _loss     = _loss*self.c + ce_loss2*(1-self.c)
+        _loss     = loss1*self.c + loss2*(1-self.c)
 
-    if self.reduction == "mean":
-        return _loss.mean()
-    elif self.reduction == "sum":
-        return _loss.sum()
-    else:
-        return _loss
+        if self.reduction == "mean":
+            return _loss.mean() + self.penality(emb)
+        elif self.reduction == "sum":
+            return _loss.sum()
+        else:
+            return _loss
+
+    def fix_inputs_by_neighbors(self, inputs, neighbors):
+        for i, x in enumerate(neighbors):
+            inputs[i][x] = torch.zeros(inputs[i][x].shape).to(inputs.device)
+
+    def penality(self, emb):
+        return self.l2*torch.norm(emb)
 
 from topk.svm import SmoothTopkSVM as TopKSmoothTopkSVM
 
