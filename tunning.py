@@ -2,7 +2,7 @@ import luigi
 from mars_gym.simulation.training import SupervisedModelTraining
 import numpy as np
 
-# PYTHONPATH="."  luigi  --module tunning ModelTunning --local-scheduler
+# PYTHONPATH="."  luigi  --module tunning ModelTunning --local-scheduler --seed 12
 class ModelTunning(luigi.WrapperTask):
   '''
   https://luigi.readthedocs.io/en/stable/luigi_patterns.html
@@ -49,7 +49,7 @@ class ModelTunning(luigi.WrapperTask):
       hist_size      = int(random_state.choice(_hist_size))
       learning_rate = float(random_state.choice(_learning_rate))
       batch_size = int(random_state.choice(_batch_size))
-      balance_loss = int(random_state.choice(_balance_loss))
+      balance_loss = float(random_state.choice(_balance_loss))
       optimizer = str(random_state.choice(_optimizer))
 
 
