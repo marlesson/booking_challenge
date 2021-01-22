@@ -39,6 +39,28 @@ def top_k_acc(input:torch.Tensor, targets:torch.Tensor, k:int=4):
     targets = targets.unsqueeze(dim=-1).expand_as(input)
     return (input == targets).max(dim=-1)[0].float().mean()
 
+def linear_combination(x, y, epsilon): 
+    return epsilon*x + (1-epsilon)*y
+
+def reduce_loss(loss, reduction='mean'):
+    return loss.mean() if reduction=='mean' else loss.sum() if reduction=='sum' else loss
+
+class LabelSmoothingCrossEntropy(nn.Module):
+    """
+        https://medium.com/towards-artificial-intelligence/how-to-use-label-smoothing-for-regularization-aa349f7f1dbb
+    """
+
+    def __init__(self, epsilon:float=0.1, reduction='mean'):
+        super().__init__()
+        self.epsilon = epsilon
+        self.reduction = reduction
+    
+    def forward(self, preds, target):
+        n = preds.size()[-1]
+        log_preds = F.log_softmax(preds, dim=-1)
+        loss = reduce_loss(-log_preds.sum(dim=-1), self.reduction)
+        nll = F.nll_loss(log_preds, target, reduction=self.reduction)
+        return linear_combination(loss/n, nll, self.epsilon)
 
 class FocalLoss(_Loss):
   def __init__(self, alpha=1, gamma=2, c=0.8, logits=False, size_average=None, reduce=None, reduction="mean"):
@@ -49,7 +71,7 @@ class FocalLoss(_Loss):
     self.logits = logits
     self.reduce = reduce
     self.c      = c
-    self.loss   = nn.CrossEntropyLoss(reduction='none')
+    self.loss   = LabelSmoothingCrossEntropy(reduction='none')
 
   def focal(self, inputs, targets):
     ce_loss   = self.loss(inputs, targets)

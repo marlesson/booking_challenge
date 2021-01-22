@@ -171,17 +171,17 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____5c19dd615c \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____8b3a2d61ff \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_10.csv"  \
 --local-scheduler
 
 
 {
-    "model_task": "SupervisedModelTraining____mars_gym_model_b____291ff27fbc",
-    "task_name": "SupervisedModelTraining____mars_gym_model_b____291ff27fbc_aea0d50b66",
+    "task_name": "SupervisedModelTraining____mars_gym_model_b____8b3a2d61ff_8156cbebdd",
     "count": 21671,
-    "acc@4": 0.5276175534123945
+    "acc@4": 0.5357851506621752
 }
+
 
 
 
