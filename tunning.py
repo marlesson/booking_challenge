@@ -17,23 +17,39 @@ class ModelTunning(luigi.WrapperTask):
 
     tasks = []
 
-    _hidden_size  = [10, 100, 300, 500]
+    # _hidden_size  = [10, 100, 300, 500]
 
-    _n_layers     = [1, 2, 4]
+    # _n_layers     = [1, 2, 4]
+
+    # _hist_size    = [10]
+
+    # _weight_decay = [0, 1e-5, 1e-3, 1e-2]
+
+    # _dropout   = [0, 0.2, 0.4, 0.6]
+
+    # _n_factors = [50, 100, 200]
+
+    # _learning_rate = [0.001, 0.0001]
+
+    # _batch_size = [64, 128, 256]
+
+    _hidden_size  = [300]
+
+    _n_layers     = [2]
 
     _hist_size    = [10]
 
-    _weight_decay = [0, 1e-5, 1e-3, 1e-2]
+    _weight_decay = [1e-2]
 
-    _dropout   = [0, 0.2, 0.4, 0.6]
+    _dropout   = [0.3]
 
-    _n_factors = [50, 100, 200]
+    _n_factors = [100]
 
-    _learning_rate = [0.001, 0.0001]
+    _learning_rate = [0.001]
 
-    _batch_size = [64, 128, 256]
+    _batch_size = [128]
 
-    _balance_loss = [1, 0.9, 0.8, 0.5]
+    _balance_loss = [1, 0.9, 0.8, 0.7, 0.5]
 
     _optimizer = ['radam', 'adam']
 
