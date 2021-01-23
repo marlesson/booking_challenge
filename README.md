@@ -164,7 +164,8 @@ mars-gym run supervised --project config.conf1_rnn \
   --loss-function-params '{
     "alpha":1,
     "gamma":3,
-    "c": 0.8
+    "c": 0.8,
+    "epsilon": 0.1,
   }'\
   --epochs 100
 ```

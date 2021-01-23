@@ -23,7 +23,7 @@ Experimentos (base:0.51797)
 * Tying Word Classify                                           (0.50237)
 * Usar focal loss nas duas saidas                               (0.52761)
 * Pegar a loss apenas de quem é vizinho.                        (0.447233 - funciona bem no treino mas não na validação)
-* Label Smoth (0.5357851)
+* Label Smoth                                                   (0.5357851)
 
 * User with 100D and normalized
-* Predict Neighbors to
+* Predict Neighbors Output 3 (0.530755)
