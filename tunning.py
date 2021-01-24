@@ -39,7 +39,7 @@ class ModelTunning(luigi.WrapperTask):
 
     _hist_size    = [10]
 
-    _weight_decay = [1e-2]
+    _weight_decay = [0, 1e-5, 1e-3, 1e-2]
 
     _dropout   = [0.3]
 
@@ -51,6 +51,8 @@ class ModelTunning(luigi.WrapperTask):
 
     _balance_loss = [1, 0.9, 0.8, 0.7, 0.5]
 
+    _epsilon   = [0.1, 0.2, 0.3, 0.5]
+    
     _optimizer = ['radam', 'adam']
 
     # emb_path = "/media/workspace/triplet_session/output/mercado_livre/assets/mercadolivre-100d.bin"
@@ -66,6 +68,7 @@ class ModelTunning(luigi.WrapperTask):
       learning_rate = float(random_state.choice(_learning_rate))
       batch_size = int(random_state.choice(_batch_size))
       balance_loss = float(random_state.choice(_balance_loss))
+      epsilon= float(random_state.choice(_epsilon))
       optimizer = str(random_state.choice(_optimizer))
 
 
@@ -83,6 +86,7 @@ class ModelTunning(luigi.WrapperTask):
             data_frames_preparation_extra_params={
               "test_split": 0.1, 
               "window_trip": hist_size,
+              "user_features_file": "all_user_features_10.csv",
               "column_stratification": "user_id",
               "filter_last_step": True,
               "balance_sample_step": 200000,
@@ -104,7 +108,8 @@ class ModelTunning(luigi.WrapperTask):
             loss_function_params={
                 "alpha":1,
                 "gamma":3,
-                "c": balance_loss
+                "c": balance_loss,
+                "epsilon": epsilon
             },
             epochs=200
           )      

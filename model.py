@@ -809,6 +809,7 @@ class NARMModel(RecommenderModule):
         n_factors: int,
         n_layers: int,
         hidden_size: int,
+        n_user_features: int,
         path_item_embedding: str,
         from_index_mapping: str,
         freeze_embedding: bool,        
@@ -818,18 +819,19 @@ class NARMModel(RecommenderModule):
 
         self.hidden_size    = hidden_size
         self.n_layers       = n_layers
-        self.n_factors  = n_factors
+        self.n_factors      = n_factors
         self.n_time_dim     = 100
         self.n_month_dim    = 10
-        
+        self.n_user_features = n_user_features# + n_factors
+
         n_booker_country_list_dim   = self.index_mapping_max_value('booker_country_list')
         n_affiliate_id_list_dim     = self.index_mapping_max_value('affiliate_id_list')
         n_device_list_dim           = self.index_mapping_max_value('device_class_list')
         self.n_hotel_country_list_dim    = self.index_mapping_max_value('last_hotel_country')
 
-        self.input_rnn_dim = self.n_factors * 2 + self.n_month_dim * 3
-        n_dense_features   = 10
-        output_dense_size  = self.hidden_size * 3 + n_dense_features
+        self.input_rnn_dim = self.n_factors * 2 + self.n_month_dim * 2 + self.n_user_features
+        n_dense_features   = 0
+        output_dense_size  = self.hidden_size * 3 + n_dense_features + self.n_user_features
 
 
         self.emb_user    = nn.Embedding(self._n_users, n_factors)
@@ -852,10 +854,11 @@ class NARMModel(RecommenderModule):
         self.v_t = nn.Linear(self.hidden_size * 2, 1, bias=False)
 
         self.activate_func = nn.SELU()
-        # self.mlp_dense = nn.Sequential(
-        #     nn.Linear(output_dense_size, output_dense_size),
-        #     nn.Tanh(),
-        #     nn.Linear(output_dense_size, output_dense_size),
+        # self.mlp_user = nn.Sequential(
+        #     nn.Linear(self.n_user_features + self.n_factors, self.n_user_features),
+        #     nn.ReLU(),
+        #     nn.Linear(self.n_user_features, self.n_user_features),
+
         # )
 
         self.att = Attention(self.input_rnn_dim)
@@ -863,6 +866,7 @@ class NARMModel(RecommenderModule):
         self.ct_dropout = nn.Dropout(dropout)
         self.b = nn.Linear(self.n_factors, output_dense_size, bias=False)
         self.h = nn.Linear(self.n_factors, output_dense_size, bias=False)
+    
 
     def index_mapping_max_value(self, key: str) -> int:
         return max(self._index_mapping[key].values())+1
@@ -903,15 +907,17 @@ class NARMModel(RecommenderModule):
         country_embs = self.emb_dropout(self.emb_country(seq_country))
 
         # e_features  = self.mlp_emb_features(torch.cat([emb_first_hotel_country, 
-        #user_features = self.mlp_user(user_features.float())
+        
 
         #emb_first_hotel_country = self.emb_country(first_hotel_country)
+        #user_features = torch.cat([user_emb, user_features.float()], 1)
+        #user_features = self.mlp_user(user_features)
 
         # Time/Month Embs
         m_emb   = self.emb_dropout(self.month_emb(start_trip_month.long()))
         m_embs   = m_emb.unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
-        user_features2 = user_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
+        user_features2 = user_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_user_features)
         #m_embs2 = dense_features.float().unsqueeze(0).expand(seq.shape[0], seq.shape[1], self.n_month_dim)
 
         # Add Time
@@ -921,13 +927,15 @@ class NARMModel(RecommenderModule):
 
         # att , user_features2
         embs        = torch.cat([embs, affiliate_emb, country_embs, m_embs, user_features2], 2).permute(1,0,2)
-        att_emb, _w = self.att(embs, embs)
-        embs        = att_emb.permute(1,0,2) # (H, B, E)
         
         # Mask
         mask        = torch.where(seq.permute(1, 0) > IDX_FIX, torch.tensor([1.], device = device), 
                                 torch.tensor([0.], device = device))
-                                        
+                                                
+       # Create transform mask
+        att_emb, _w = self.att(embs, embs)
+        embs        = att_emb.permute(1,0,2) # (H, B, E)
+
         # Clear mask
         #embs        = mask.unsqueeze(2).expand_as(embs.permute(1,0,2)).permute(1,0,2) * embs        
         gru_out, hidden = self.gru(embs, hidden) 

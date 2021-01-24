@@ -63,7 +63,7 @@ class LabelSmoothingCrossEntropy(nn.Module):
         return linear_combination(loss/n, nll, self.epsilon)
 
 class FocalLoss(_Loss):
-  def __init__(self, alpha=1, gamma=2, c=0.8, logits=False, size_average=None, reduce=None, reduction="mean"):
+  def __init__(self, alpha=1, gamma=2, c=0.8, epsilon=0.1, logits=False, size_average=None, reduce=None, reduction="mean"):
     super().__init__(size_average, reduce, reduction)
     self.reduction = reduction
     self.alpha  = alpha
@@ -71,7 +71,7 @@ class FocalLoss(_Loss):
     self.logits = logits
     self.reduce = reduce
     self.c      = c
-    self.loss   = LabelSmoothingCrossEntropy(reduction='none')
+    self.loss   = LabelSmoothingCrossEntropy(reduction='none', epsilon=epsilon)
 
   def focal(self, inputs, targets):
     ce_loss   = self.loss(inputs, targets)
@@ -97,28 +97,28 @@ class FocalLoss(_Loss):
     else:
         return _loss
 
-from topk.svm import SmoothTopkSVM as TopKSmoothTopkSVM
+# from topk.svm import SmoothTopkSVM as TopKSmoothTopkSVM
 
-class CustomLoss(_Loss):
-    def __init__(self, size_average=None, reduce=None, reduction="mean", clip=None):
-        super().__init__(size_average, reduce, reduction)
-        self.reduction = reduction
-        self.clip = clip
-        self.loss = nn.CrossEntropyLoss(reduction='none')
+# class CustomLoss(_Loss):
+#     def __init__(self, size_average=None, reduce=None, reduction="mean", clip=None):
+#         super().__init__(size_average, reduce, reduction)
+#         self.reduction = reduction
+#         self.clip = clip
+#         self.loss = nn.CrossEntropyLoss(reduction='none')
 
 
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor, sample_weights) -> torch.Tensor:
-        loss = self.loss(inputs, targets)
-        loss = loss * 1/torch.log(1+sample_weights)
-        loss[torch.isnan(loss)] = 0
+#     def forward(self, inputs: torch.Tensor, targets: torch.Tensor, sample_weights) -> torch.Tensor:
+#         loss = self.loss(inputs, targets)
+#         loss = loss * 1/torch.log(1+sample_weights)
+#         loss[torch.isnan(loss)] = 0
 
-        if self.reduction == "mean":
-            return loss.mean()
-        elif self.reduction == "sum":
-            return loss.sum()
-        else:
-            return loss
+#         if self.reduction == "mean":
+#             return loss.mean()
+#         elif self.reduction == "sum":
+#             return loss.sum()
+#         else:
+#             return loss
 
-class SmoothTopkSVM(TopKSmoothTopkSVM):
-    def forward(self, inputs: torch.Tensor, targets: torch.Tensor, sample_weights) -> torch.Tensor:
-        return super().forward(inputs, targets)
+# class SmoothTopkSVM(TopKSmoothTopkSVM):
+#     def forward(self, inputs: torch.Tensor, targets: torch.Tensor, sample_weights) -> torch.Tensor:
+#         return super().forward(inputs, targets)

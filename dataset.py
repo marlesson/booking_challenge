@@ -106,16 +106,22 @@ def _choose_except(values: list, exception: Any) -> int:
         if value != exception:
             return value
 
-def _change_idx(values: list, neighbors_dict = dict, r = 1):
+def _add_null_idx(arr, prob=0.5):
+    for i in range(len(arr)):
+        if random.random() <= prob:
+            arr[i] = 0
+    
+def _change_idx(values: list, neighbors_dict = dict, prob_n = 0.7, prob_u = 0.3):
+    number = np.random.randint(0, len(values))
 
-    if random.random() <= r:
-        number = np.random.randint(0, len(values))
-
+    if random.random() <= prob_n:
         if values[number] in neighbors_dict:
             neighbors_dict[values[number]].append(values[number])
             value  = random.choice(neighbors_dict[values[number]])
 
             values[number] = value
+    else:
+        values[number] = 0
 
     return values
 
@@ -279,6 +285,7 @@ class InteractionsDatasetWithMask(Dataset):
             self._convert_dtype(rows[column.name].values, column.type)
             for column in self._input_columns if column.name in self._data_frame.columns
         )
+
         
         if (
             self._project_config.item_is_input
@@ -304,7 +311,8 @@ class InteractionsDatasetWithMask(Dataset):
         if self._data_key == 'train_data':
             _neighbors_dict = self.neighbors_dict.copy()
             list_modif = np.array([_change_idx(l,_neighbors_dict) for l in inputs[self._list_input_index]])
-        #inputs[self._list_input_index]
+            
+            _add_null_idx(inputs[0])
 
         return inputs, output
 

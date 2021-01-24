@@ -24,6 +24,13 @@ Experimentos (base:0.51797)
 * Usar focal loss nas duas saidas                               (0.52761)
 * Pegar a loss apenas de quem é vizinho.                        (0.447233 - funciona bem no treino mas não na validação)
 * Label Smoth                                                   (0.5357851)
+* Predict Neighbors Output 3                                    (0.530755)
 
-* User with 100D and normalized
-* Predict Neighbors Output 3 (0.530755)
+* User emb + user features                                      (0.4836878)
+* User emb + user features com aug. USER_ID:0                   (0.52397)
+* User emb + user features (MLP)                                (0.4842877)
+* User emb + user features (MLP) com aug. USER_ID:0             (0.52595)
+* City_list with aug. CITY_ID:0 (like user)                     (0.53620)
+* Colocar uma transforme no lugar da att                        (0.251580)
+* Dropout put Zero in Seq
+* User with 100D                                                (0.523695)
