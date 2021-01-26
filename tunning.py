@@ -17,43 +17,31 @@ class ModelTunning(luigi.WrapperTask):
 
     tasks = []
 
-    # _hidden_size  = [10, 100, 300, 500]
+    _n_factors = [10, 50, 100, 200]
 
-    # _n_layers     = [1, 2, 4]
+    _hidden_size  = [10, 100, 300, 500]
 
-    # _hist_size    = [10]
-
-    # _weight_decay = [0, 1e-5, 1e-3, 1e-2]
-
-    # _dropout   = [0, 0.2, 0.4, 0.6]
-
-    # _n_factors = [50, 100, 200]
-
-    # _learning_rate = [0.001, 0.0001]
-
-    # _batch_size = [64, 128, 256]
-
-    _hidden_size  = [300]
-
-    _n_layers     = [2]
+    _n_layers     = [1, 2, 4, 6]
 
     _hist_size    = [10]
 
     _weight_decay = [0, 1e-5, 1e-3, 1e-2]
 
-    _dropout   = [0.3]
-
-    _n_factors = [100]
+    _dropout   = [0, 0.3, 0.6, 0.8]
 
     _learning_rate = [0.001]
 
-    _batch_size = [128]
+    _batch_size = [64, 128, 256]
 
-    _balance_loss = [1, 0.9, 0.8, 0.7, 0.5]
+    _balance_loss = [1, 0.9, 0.8, 0.6, 0.5]
 
     _epsilon   = [0.1, 0.2, 0.3, 0.5]
-    
-    _optimizer = ['radam', 'adam']
+
+    _alpha     = [1, 2, 5, 10]
+
+    _gamma     = [2, 3, 10, 100]
+
+    _optimizer = ['radam']
 
     # emb_path = "/media/workspace/triplet_session/output/mercado_livre/assets/mercadolivre-100d.bin"
 
@@ -69,6 +57,8 @@ class ModelTunning(luigi.WrapperTask):
       batch_size = int(random_state.choice(_batch_size))
       balance_loss = float(random_state.choice(_balance_loss))
       epsilon= float(random_state.choice(_epsilon))
+      alpha= float(random_state.choice(_alpha))
+      gamma= float(random_state.choice(_gamma))
       optimizer = str(random_state.choice(_optimizer))
 
 
@@ -80,6 +70,7 @@ class ModelTunning(luigi.WrapperTask):
               "hidden_size": hidden_size, 
               "n_layers": n_layers, 
               "dropout": dropout, 
+              "n_user_features": 10,
               "from_index_mapping": False,
               "path_item_embedding": False, 
               "freeze_embedding": False},
@@ -95,7 +86,7 @@ class ModelTunning(luigi.WrapperTask):
             test_size=0.0,
             val_size=0.1,
             early_stopping_min_delta=0.0001,
-            early_stopping_patience=5,    
+            early_stopping_patience=10,    
             learning_rate=learning_rate,
             metrics=["loss", "top_k_acc", "top_k_acc2"],
             batch_size=batch_size,
@@ -106,12 +97,15 @@ class ModelTunning(luigi.WrapperTask):
             loss_function="ce",
             loss_function_class="loss.FocalLoss",
             loss_function_params={
-                "alpha":1,
-                "gamma":3,
+                "alpha":alpha,
+                "gamma":gamma,
                 "c": balance_loss,
                 "epsilon": epsilon
             },
-            epochs=200
+            epochs=500,
+            monitor_metric='val_top_k_acc',
+            monitor_mode='max',
+            generator_workers=10
           )      
 
       yield job
