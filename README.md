@@ -99,10 +99,10 @@ PYTHONPATH="." luigi --module evaluation EvaluationTask \
 mars-gym run supervised --project config.conf1_rnn \
   --recommender-module-class model.NARMModel \
   --recommender-extra-params '{
-    "n_factors": 100, 
+    "n_factors": 50, 
     "hidden_size": 300, 
-    "n_layers": 2, 
-    "dropout": 0.3, 
+    "n_layers": 1, 
+    "dropout": 0.2, 
     "n_user_features": 10,
     "from_index_mapping": false,
     "path_item_embedding": false, 
@@ -121,17 +121,17 @@ mars-gym run supervised --project config.conf1_rnn \
   --early-stopping-patience 5 \
   --learning-rate 0.001 \
   --metrics='["loss", "top_k_acc", "top_k_acc2"]' \
-  --batch-size 128 \
+  --batch-size 64 \
   --optimizer "radam" \
   --optimizer-params '{
-    "weight_decay": 1e-2
+    "weight_decay": 0.01
     }' \
   --loss-function ce \
   --loss-function-class loss.FocalLoss \
   --loss-function-params '{
     "alpha":1,
     "gamma":3,
-    "c": 0.8,
+    "c": 0.5,
     "epsilon": 0.1
     }' \
   --epochs 100 \
@@ -142,27 +142,18 @@ mars-gym run supervised --project config.conf1_rnn \
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____ae4b748000 \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____7e4be3acf9 \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_10.csv"  \
 --local-scheduler
 
 
 {
-    "task_name": "SupervisedModelTraining____mars_gym_model_b____ae4b748000_ecd98441ed",
+    "task_name": "SupervisedModelTraining____mars_gym_model_b____7e4be3acf9_897aea9091",
     "count": 21671,
-    "acc@4": 0.5372156337963176
+    "acc@4": 0.5417378062848969
 }
 
 
-
-
-
-PYTHONPATH="." luigi --module evaluation EvaluationTask \
---model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____1bfbece2c9 \
---file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_10.csv"  \
---neighbors-file "/media/workspace/booking_challenge/output/booking/dataset/neighbors_dict_sim_map_c.pkl" \
---local-scheduler
 
 ## With User 
 
