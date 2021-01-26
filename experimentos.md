@@ -32,5 +32,6 @@ Experimentos (base:0.51797)
 * User emb + user features (MLP) com aug. USER_ID:0             (0.52595)
 * City_list with aug. CITY_ID:0 (like user)                     (0.53620)
 * Colocar uma transforme no lugar da att                        (0.251580)
-* Dropout put Zero in Seq
 * User with 100D                                                (0.523695)
+* New DataEngennier - Features                                  (0.53721)
+* Neibors with KNN

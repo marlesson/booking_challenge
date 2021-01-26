@@ -46,7 +46,7 @@ mars-gym run supervised --project config.conf1_rnn \
     "n_factors": 100, 
     "hidden_size": 300, 
     "n_layers": 1, 
-    "dropout": 0.2, 
+    "dropout": 0.3, 
     "window_trip": 10,
     "from_index_mapping": false,
     "path_item_embedding": false, 
@@ -54,6 +54,7 @@ mars-gym run supervised --project config.conf1_rnn \
   --data-frames-preparation-extra-params '{
     "test_split": 0.1, 
     "window_trip": 10,
+    "user_features_file": "all_user_features_10.csv",
     "column_stratification": "user_id",
     "filter_last_step": true,
     "balance_sample_step": 200000,
@@ -61,11 +62,20 @@ mars-gym run supervised --project config.conf1_rnn \
   --test-size 0 \
   --val-size 0.1 \
   --early-stopping-min-delta 0.0001 \
+  --early-stopping-patience 5 \
   --learning-rate 0.001 \
-  --metrics='["loss"]' \
+  --metrics='["loss", "top_k_acc", "top_k_acc2"]' \
   --batch-size 128 \
   --loss-function ce \
-  --epochs 100
+  --loss-function-class loss.FocalLoss \
+  --loss-function-params '{
+    "alpha":1,
+    "gamma":3,
+    "c": 0.8,
+    "epsilon": 0.1
+    }' \
+  --epochs 100 \
+  --generator-workers 8
 ```
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
@@ -124,21 +134,26 @@ mars-gym run supervised --project config.conf1_rnn \
     "c": 0.8,
     "epsilon": 0.1
     }' \
-  --epochs 100
+  --epochs 100 \
+  --monitor-metric val_top_k_acc \
+  --monitor-mode max \
+  --generator-workers 4
 ```
 
 PYTHONPATH="." luigi --module evaluation EvaluationTask \
 --model-task-class "mars_gym.simulation.training.SupervisedModelTraining" \
---model-task-id SupervisedModelTraining____mars_gym_model_b____def9c47799 \
+--model-task-id SupervisedModelTraining____mars_gym_model_b____ae4b748000 \
 --file "/media/workspace/booking_challenge/output/booking/dataset/test_0.1_10.csv"  \
 --local-scheduler
 
 
 {
-    "task_name": "SupervisedModelTraining____mars_gym_model_b____def9c47799_047361c59b",
+    "task_name": "SupervisedModelTraining____mars_gym_model_b____ae4b748000_ecd98441ed",
     "count": 21671,
-    "acc@4": 0.5362004522172489
+    "acc@4": 0.5372156337963176
 }
+
+
 
 
 

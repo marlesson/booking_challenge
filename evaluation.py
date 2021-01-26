@@ -70,19 +70,22 @@ def acc(r, k =4):
     r = r[:k]
     return np.sum(r)
 
-def _sort_rank_list(score, neighbors_idx, index_mapping):
-    # UNK, PAD, PAD
-    score[0]  = score[1] = score[2] = score[3] = 0
-    item_idx  = np.argsort(score)[::-1][:SCORE_LIMIT]
+def _sort_rank_list(scores, cities_list, neighbors_idx, index_mapping):
+    # UNK, PAD, PAD, Cities in List
+    #from IPython import embed; embed()
+    scores[0]  = scores[1] = scores[2] = scores[3] = 0
+    #scores[cities_list]  = 0
+
+    item_idx  = np.argsort(scores)[::-1][:SCORE_LIMIT]
     
     if neighbors_idx and len(np.unique(neighbors_idx)) > 0:
         neighbors_idx = np.unique(neighbors_idx)
         
         # Not Neighbors
-        n_idx = list(set(np.arange(len(score))) - set(neighbors_idx))
-        score[n_idx] = 0
+        n_idx = list(set(np.arange(len(scores))) - set(neighbors_idx))
+        scores[n_idx] = 0
 
-        item_idx  = np.argsort(score)[::-1][:SCORE_LIMIT]
+        item_idx  = np.argsort(scores)[::-1][:SCORE_LIMIT]
         item_id   = [int(index_mapping[item]) for item in item_idx if item in neighbors_idx and index_mapping[item] != "M"]
     else:
         item_id   = [int(index_mapping[item]) for item in item_idx if index_mapping[item] != "M"]
@@ -192,7 +195,7 @@ class EvaluationTask(BaseEvaluationTask):
         target = 'last_city_id'
         print(df.head())
         if target in df.columns:
-          df_metric = df[['utrip_id', 'last_city_id', 'last_hotel_country']]
+          df_metric = df[['utrip_id', 'city_id_list', 'last_city_id', 'last_hotel_country']]
 
         df = preprocess_interactions_data_frame(
             df, 
@@ -322,6 +325,8 @@ class EvaluationTask(BaseEvaluationTask):
 
                 scores_tensor: torch.Tensor  = model.recommendation_score(*input_params)
                 scores_batch = scores_tensor.detach().cpu().numpy()
+
+                cities_list  = x[2].detach().cpu().numpy()
                 #neighbors_dict
                 #from IPython import embed; embed()
                 
@@ -341,12 +346,12 @@ class EvaluationTask(BaseEvaluationTask):
                     #scores.extend(scores_batch)
                     neighbors_idx = [None for i in range(len(scores_batch))]
                 # Test
-                _sort_rank_list(scores_batch[0], neighbors_idx=neighbors_idx[0], index_mapping=reverse_index_mapping)
+                _sort_rank_list(scores_batch[0], neighbors_idx=neighbors_idx[0], cities_list=cities_list[0], index_mapping=reverse_index_mapping)
                 
                 #from IPython import embed; embed()
                 with Pool(3) as p:
                     _rank_list = list(tqdm(
-                        p.starmap(functools.partial(_sort_rank_list, index_mapping=reverse_index_mapping), zip(scores_batch, neighbors_idx)),
+                        p.starmap(functools.partial(_sort_rank_list, index_mapping=reverse_index_mapping), zip(scores_batch, cities_list, neighbors_idx)),
                         total=len(scores_batch),
                     ))
                     
