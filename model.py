@@ -838,6 +838,7 @@ class NARMModel(RecommenderModule):
         n_layers: int,
         hidden_size: int,
         n_user_features: int,
+        n_dense_features: int,
         path_item_embedding: str,
         from_index_mapping: str,
         freeze_embedding: bool,        
@@ -851,7 +852,7 @@ class NARMModel(RecommenderModule):
         self.n_time_dim      = 100
         self.n_month_dim     = 10
         self.n_user_features = n_user_features# + n_factors
-        self.n_dense_features = 5
+        self.n_dense_features = n_dense_features
 
         n_booker_country_list_dim   = self.index_mapping_max_value('booker_country_list')
         n_affiliate_id_list_dim     = self.index_mapping_max_value('affiliate_id_list')
@@ -1064,104 +1065,3 @@ class NARMModel(RecommenderModule):
 
     def init_hidden(self, batch_size):
         return torch.zeros((self.n_layers * 2, batch_size, self.hidden_size), requires_grad=True)        
-
-class NARMTimeSpaceModel(RecommenderModule):
-    '''
-    https://github.com/Wang-Shuo/Neural-Attentive-Session-Based-Recommendation-PyTorch.git
-    '''
-    def __init__(
-        self,
-        project_config: ProjectConfig,
-        index_mapping: Dict[str, Dict[Any, int]],
-        n_factors: int,
-        n_layers: int,
-        hidden_size: int,
-        path_item_embedding: str,
-        from_index_mapping: str,
-        freeze_embedding: bool,        
-        dropout: float        
-    ):
-        super().__init__(project_config, index_mapping)
-
-        self.hidden_size    = hidden_size
-        self.n_layers       = n_layers
-        self.embedding_dim  = n_factors
-        n_time_dim = 100
-        #self.emb = nn.Embedding(self._n_items, self.embedding_dim, padding_idx = 0)
-
-        self.emb = load_embedding(self._n_items, n_factors, path_item_embedding, 
-                                                from_index_mapping, index_mapping, freeze_embedding)
-        self.time_emb   = TimeEmbedding(n_time_dim, n_factors)
-        
-        self.project_matrix = nn.Embedding(15, self.embedding_dim*self.embedding_dim)
-
-        self.emb_dropout = nn.Dropout(dropout)
-        self.gru = nn.GRU(self.embedding_dim, self.hidden_size, self.n_layers)
-
-        self.a_1 = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
-        self.a_2 = nn.Linear(self.hidden_size, self.hidden_size, bias=False)
-        self.v_t = nn.Linear(self.hidden_size, 1, bias=False)
-        
-        self.ct_dropout = nn.Dropout(dropout)
-        self.b = nn.Linear(self.embedding_dim, 2 * self.hidden_size, bias=False)
-        
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    def forward(self, session_ids, item_ids, item_history_ids, duration_list, trip_month):
-        device = item_ids.device
-        seq    = item_history_ids.permute(1,0)  #TODO
-
-        hidden  = self.init_hidden(seq.size(1)).to(device)
-        embs    = self.emb_dropout(self.emb(seq))
-        matrix_time = self.project_matrix(trip_month.long()).view(
-            trip_month.shape[0], self.embedding_dim, self.embedding_dim)
-
-
-        # Add Time
-        t_embs  = self.time_emb(duration_list.float().unsqueeze(2)).permute(1,0,2)  # (H, B, E)
-        embs    = (embs + t_embs)/2
-
-        # [locate_shift_ids.reshape(-1).long()]
-        embs = torch.matmul(embs.permute(1,0,2), matrix_time).permute(1,0,2)
-
-        gru_out, hidden = self.gru(embs, hidden)
-
-        # fetch the last hidden state of last timestamp
-        ht      = hidden[-1]
-        gru_out = gru_out.permute(1, 0, 2)
-
-        c_global = ht
-        q1 = self.a_1(gru_out.contiguous().view(-1, self.hidden_size)).view(gru_out.size())  
-        q2 = self.a_2(ht)
-
-        mask      = torch.where(seq.permute(1, 0) > 0, torch.tensor([1.], device = device), 
-                        torch.tensor([0.], device = device))
-
-        q2_expand = q2.unsqueeze(1).expand_as(q1)
-        q2_masked = mask.unsqueeze(2).expand_as(q1) * q2_expand
-
-        alpha   = self.v_t(torch.sigmoid(q1 + q2_masked)\
-                    .view(-1, self.hidden_size))\
-                    .view(mask.size())
-        c_local = torch.sum(alpha.unsqueeze(2).expand_as(gru_out) * gru_out, 1)
-
-        c_t     = torch.cat([c_local, c_global], 1)
-        c_t     = self.ct_dropout(c_t)
-        
-        #item_embs   = self.emb(torch.arange(self._n_items).to(device).long()).expand_as(q1)
-        
-        item_embs = self.emb(torch.arange(self._n_items).to(device).long()).unsqueeze(0).expand(c_t.shape[0], self._n_items, self.embedding_dim)
-        item_embs = torch.matmul(item_embs, matrix_time)
-        #scores  = torch.matmul(c_t, self.b(item_embs).permute(0, 1, 2))
-        scores    = torch.matmul(c_t.unsqueeze(1), self.b(item_embs).permute(0,2, 1)).squeeze(1)#torch.matmul(c_t.unsqueeze(1), self.b(item_embs).permute(0,2, 1))
-        return scores
-
-    def recommendation_score(self, session_ids, item_ids, item_history_ids, duration_list, trip_month):
-        
-        scores = self.forward(session_ids, item_ids, item_history_ids, duration_list, trip_month)
-        scores = scores[torch.arange(scores.size(0)),item_ids]
-
-        return scores
-
-    def init_hidden(self, batch_size):
-        return torch.zeros((self.n_layers, batch_size, self.hidden_size), requires_grad=True)          

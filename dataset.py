@@ -12,7 +12,7 @@ from mars_gym.utils.index_mapping import map_array
 from mars_gym.utils.utils import parallel_literal_eval, reduce_df_mem
 import gc
 
-NEIGHBOARD_FILE = "/media/workspace/booking_challenge/output/booking/dataset/neighbors_dict_sim_map_c.pkl"
+NEIGHBOARD_FILE = "./output/booking/dataset/neighbors_dict_sim_map_c.pkl"
 
 
 def literal_eval_array_columns(data_frame: pd.DataFrame, columns: List[Column]):

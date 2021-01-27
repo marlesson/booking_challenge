@@ -56,7 +56,7 @@ def list_and_pad(pad=5, dtype=int, ignore_last_value=True):
 class SplitAndPreprocessDataset(luigi.Task):
   test_split: float = luigi.IntParameter(default=0.1)
   window_trip: int = luigi.IntParameter(default=5)
-  user_features_file: str = luigi.Parameter(default="all_user_features.csv")
+  #user_features_file: str = luigi.Parameter(default="all_user_features.csv")
   # def requires(self):
 
   def output(self):
@@ -127,7 +127,6 @@ class SplitAndPreprocessDataset(luigi.Task):
 
       scaler = StandardScaler()
       df[numerical_ix] = scaler.fit_transform(df[numerical_ix])
-
 
   def group_by_trip(self, df):
     df_trip = df.sort_values(['step']).groupby(['utrip_id']).agg(
@@ -267,19 +266,18 @@ class SplitAndPreprocessDataset(luigi.Task):
     # Normalize
     self.normalize_features(df_all)
 
-
+    # Split train/test
     df_train, df_test = df_all[df_all['ds'] == 'train'], df_all[df_all['ds'] == 'test']
 
     # Add/Filter  Train Informaion
     # --------------------------------------------------------
     df_train = self.filter_train_data(df_train)
     
-    # add country_count
+    # Add country_count
     df_country_count = df_train.groupby(['city_id'])\
                         .agg(country_count=('user_id','count')).reset_index()
     df_train = df_train.merge(df_country_count, on='city_id', how='left')
-    df_test['country_count'] = 1
-
+    df_test['country_count'] = 1 # 
 
     print(df_train.head())
     print(df_train.shape)
@@ -290,8 +288,8 @@ class SplitAndPreprocessDataset(luigi.Task):
     df_trip_test  = self.group_by_trip(df_test)
 
     # Add Steps Interaction in Train Set
-    #df_trip_train = pd.concat([df_trip_train, 
-    #                         self.add_steps_interaction(df_train, df_train.step.max()-1)])
+    df_trip_train = pd.concat([df_trip_train, 
+                            self.add_steps_interaction(df_train, df_train.step.max()-1)])
     
     print(df_trip_train.head())
     print(df_trip_train.shape)
@@ -301,15 +299,49 @@ class SplitAndPreprocessDataset(luigi.Task):
     df_trip_train = df_trip_train[df_trip_train['trip_size'] >= 3]
     df_trip_test  = df_trip_test[df_trip_test['trip_size'] >= 3]
 
-    # Add User Features
-    df_user = pd.read_csv(os.path.join(DATASET_DIR, self.user_features_file), 
-                    dtype={"user_id": str}, usecols=["user_id", 'user_features'])    
-    df_trip_train  = df_trip_train.merge(df_user, on='user_id', how='left')
-    df_trip_test   = df_trip_test.merge(df_user, on='user_id', how='left')
+    # # Add User Features
+    # df_user = pd.read_csv(os.path.join(DATASET_DIR, self.user_features_file), 
+    #                 dtype={"user_id": str}, usecols=["user_id", 'user_features'])    
+    # df_trip_train  = df_trip_train.merge(df_user, on='user_id', how='left')
+    # df_trip_test   = df_trip_test.merge(df_user, on='user_id', how='left')
 
     # Remove duplicates
     df_trip_train = df_trip_train.groupby(['utrip_id', 'last_step']).last().reset_index()
     df_trip_test  = df_trip_test.groupby(['utrip_id', 'last_step']).last().reset_index()
+
+    # Save
+    df_trip_train.to_csv(self.output()[0].path, index=False)
+    df_trip_test.to_csv(self.output()[1].path, index=False)
+
+class AddUserFeatures(luigi.Task):
+  test_split: float = luigi.IntParameter(default=0.1)
+  window_trip: int = luigi.IntParameter(default=5)
+  user_features_file: str = luigi.Parameter(default="all_user_features.csv")
+
+  def requires(self):
+    return SplitAndPreprocessDataset(test_split=self.test_split, 
+                                      window_trip=self.window_trip)
+
+  def output(self):
+    return luigi.LocalTarget(os.path.join(DATASET_DIR, 
+              "train_{}_{}_with_{}".format(self.test_split, self.window_trip, self.user_features_file))),\
+            luigi.LocalTarget(os.path.join(DATASET_DIR, 
+              "test_{}_{}_with_{}".format(self.test_split, self.window_trip, self.user_features_file)))                    
+
+
+  def run(self):
+    os.makedirs(DATASET_DIR, exist_ok=True)
+
+    # Train Dataset
+    df_trip_train = pd.read_csv(self.input()[0].path, dtype={"user_id": str})
+    df_trip_test  = pd.read_csv(self.input()[1].path, dtype={"user_id": str})
+
+    # Add User Features
+    df_user = pd.read_csv(os.path.join(DATASET_DIR, self.user_features_file), 
+                    dtype={"user_id": str}, usecols=["user_id", 'user_features'])    
+
+    df_trip_train  = df_trip_train.merge(df_user, on='user_id', how='left')
+    df_trip_test   = df_trip_test.merge(df_user, on='user_id', how='left')
 
     # Save
     df_trip_train.to_csv(self.output()[0].path, index=False)
@@ -327,9 +359,9 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     item_column: str = luigi.Parameter(default="last_city_id")
 
     def requires(self):
-        return SplitAndPreprocessDataset(test_split=self.test_split, 
-                                          window_trip=self.window_trip,
-                                          user_features_file=self.user_features_file)
+        return AddUserFeatures(test_split=self.test_split, 
+                                window_trip=self.window_trip,
+                                user_features_file=self.user_features_file)
 
     @property
     def timestamp_property(self) -> str:
@@ -345,10 +377,6 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
 
     def read_data_frame(self) -> pd.DataFrame:
         df = pd.read_csv(self.read_data_frame_path)
-
-        if self.filter_trip_size > 0:
-            df = df[df['trip_size'] >= self.filter_trip_size]
-        
         return df
 
     def transform_data_frame(self, df: pd.DataFrame, data_key: str) -> pd.DataFrame:
@@ -359,7 +387,7 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
             'user_city_unique',
             'user_trip_count',
             'is_new_user',
-            'is_multiple_country',
+            'is_multiple_country'
         ]
         df['dense_features'] = df[dense_features].values.tolist()
 
