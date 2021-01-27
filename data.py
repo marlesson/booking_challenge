@@ -368,6 +368,10 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
         return "start_trip"
 
     @property
+    def stratification_property(self) -> str:
+        return "last_city_id"
+
+    @property
     def dataset_dir(self) -> str:
         return DATASET_DIR
 
@@ -421,4 +425,5 @@ class SessionInteractionDataFrame(BasePrepareDataFrames):
     
     def sample_balance_df(self, df, n_samples, state=42):
         df['sample_weights'] = 1/np.log(1+df['country_count'])
+        print(df.shape)
         return df.sample(n_samples, weights='sample_weights', random_state=state)
