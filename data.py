@@ -102,6 +102,7 @@ class SplitAndPreprocessDataset(luigi.Task):
     
     # Country interactions in time
     df['country_action_count'] = 1
+    
     df['country_action_count'] = df.groupby(['hotel_country'])['country_action_count'].transform(pd.Series.cumsum)
         
     # Item user interactions in time
@@ -256,7 +257,7 @@ class SplitAndPreprocessDataset(luigi.Task):
         
     df_train['ds'] = 'train'
     df_test['ds']  = 'test'
-    df_all = pd.concat([df_train, df_test]).sort_values('checkin')
+    df_all = pd.concat([df_train, df_test]).fillna("").sort_values('checkin')
 
     print(df_train.shape, df_test.shape, df_all.shape)
     
